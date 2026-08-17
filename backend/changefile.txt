@@ -1,0 +1,41 @@
+
+# Bugfix: TPO Admin verification tab (/admin/students?tab=verification) — Posting Type now shows & filters by registered interest.
+# Problem: the "Posting types" line and the top Posting-Type filter were driven by the student's job
+# applications. But verification is a prerequisite to applying, so pending students have NO applications —
+# only registered interests. Result: posting type showed "—" (couldn't tell which program the student
+# enrolled in / showed interest in) and the filter returned nobody for pending students.
+# Fix:
+#  - Frontend (VerificationTab.tsx): new getStudentPostingTypeChips() derives posting types from
+#    student.interests[] (each already carries a human label via INTEREST_LABELS), deduped by label, with a
+#    fallback to application-derived types (formatPostingTypeLabel) for already-applied/re-verification cases.
+#    Row renders them as secondary Badges; the Review dialog gains a "Posting Types / Interests" section
+#    listing each interest label + registered date. (Dropped the unused PostingTypeBadge import.)
+#  - Backend (admin.service.ts): getStudents resolves the posting-type master's value when
+#    posting_type_master_id is supplied; buildStudentWhere now matches posting_type_master_id as an OR of
+#    applications.posting.posting_type_master_id OR interest_registrations.interest_type == masterValue
+#    (case-insensitive). Inclusive/additive — the shared student list also surfaces interested-but-not-applied
+#    students when filtered by posting type. interest_type==master.value is the same assumption the existing
+#    InterestLists filter relies on. NO migration (query logic only).
+src/components/admin/VerificationTab.tsx
+docs/silveroak_backend/src/modules/admin/admin.service.ts
+
+# Enhancement: Master → NOC Templates — certificate To-block, Student Details, footer email, letterhead
+# Updated the NOC certificate letter in BOTH renderers (kept in sync): the PDF
+#   (noc-certificate.renderer.ts) and the on-screen preview (NocTemplatePreview.tsx, shared by Master Data
+#   live preview / student NocCertificate / NOCRequestDetailSheet / NOCReviewDialog).
+#   1) "To," block is now fixed: To, / H.R. Manager / Training Team / <Company Name> (dropped the
+#      contact-person name+designation lines from the recipient block; body tokens still work).
+#   2) Student Details rendered as labeled rows: Enrollment No., Student Name, Institute Name, Course,
+#      Branch, Semester, Duration (was a 5-column table; Institute/Course were not shown before).
+#   3) Signature footer: Email: internship@silveroakuni.ac.in; Mobile Number line removed (preview had it;
+#      PDF already had none).
+#   4) Letterhead footer = three center-aligned lines: "Established under The Gujarat Private Universities
+#      Act 2009" / "Nr. Bhavik Publications, Opp. Bhagwat Vidhyapith, S.G. Road, Gota, Ahmedabad - 382481" /
+#      "Phone : +91-79-66046300 | E-Mail : info@silveroakuni.ac.in | Web : www.silveroakuni.ac.in".
+#   No schema/type/migration — all data already in the snapshot/context. Issued PDF files are NOT
+#   regenerated (historical PDFs keep old text); the on-screen view updates retroactively.
+#   Verified: BE tsc 0, FE tsc 91 (baseline).
+# --- Backend ---
+docs/silveroak_backend/src/modules/noc/noc-certificate.renderer.ts
+# --- Frontend ---
+src/components/noc/NocTemplatePreview.tsx

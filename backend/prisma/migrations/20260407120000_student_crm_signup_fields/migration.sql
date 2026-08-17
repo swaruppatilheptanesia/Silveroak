@@ -1,0 +1,20 @@
+-- AlterTable
+ALTER TABLE "students"
+ADD COLUMN     "category" VARCHAR(50),
+ADD COLUMN     "aadhaar_number" VARCHAR(20),
+ADD COLUMN     "temporary_enrolment_no" VARCHAR(50),
+ADD COLUMN     "parent_name" VARCHAR(200),
+ADD COLUMN     "parent_contact_no" VARCHAR(20),
+ADD COLUMN     "blood_group" VARCHAR(20),
+ADD COLUMN     "program_name" VARCHAR(100),
+ADD COLUMN     "admission_year" INTEGER,
+ADD COLUMN     "current_semester" VARCHAR(50),
+ADD COLUMN     "current_semester_spi" DECIMAL(4,2),
+ADD COLUMN     "current_semester_cpi" DECIMAL(4,2),
+ADD COLUMN     "current_semester_cgpa" DECIMAL(4,2),
+ADD COLUMN     "exam_form_status" VARCHAR(100),
+ADD COLUMN     "overall_attendance_percentage" DECIMAL(5,2),
+ADD COLUMN     "board10" VARCHAR(200),
+ADD COLUMN     "passing_year10" INTEGER,
+ADD COLUMN     "board12_or_diploma" VARCHAR(200),
+ADD COLUMN     "passing_year12_or_diploma" INTEGER;

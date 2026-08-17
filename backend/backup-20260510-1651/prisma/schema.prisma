@@ -1,0 +1,1563 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// ENUMS - Core
+// ============================================================
+
+enum UserRole {
+  student
+  tpo_admin
+  tpo_employee
+  faculty_coordinator
+  recruiter
+  management
+  super_admin
+}
+
+enum VerificationStatus {
+  pending
+  verified
+  rejected
+}
+
+enum InterestType {
+  placement
+  summer_internship
+  winter_internship
+  final_semester_internship
+  nep_internship
+  stipend_internship
+  dissertation
+}
+
+enum MasterCategory {
+  technology
+  skill
+  interest
+  branch
+  academic_year
+  policy_category
+  noc_type
+  posting_type
+}
+
+// ============================================================
+// ENUMS - Business
+// ============================================================
+
+enum CompanyStatus {
+  active
+  inactive
+}
+
+enum CompanyClassification {
+  preferred
+  normal
+  blacklisted
+}
+
+enum EngagementType {
+  placement
+  internship
+  campus_visit
+  guest_lecture
+  workshop
+}
+
+enum PostingType {
+  job
+  internship
+  stipend_internship
+}
+
+enum WorkMode {
+  onsite
+  remote
+  hybrid
+}
+
+enum PostingStatus {
+  draft
+  published
+  closed
+}
+
+enum ApplicationStage {
+  applied
+  mock_round
+  shortlisted
+  test_scheduled
+  interview
+  hr_round
+  offer_released
+  rejected
+}
+
+enum MockRoundResult {
+  pending
+  passed
+  failed
+}
+
+enum FeedbackDecision {
+  shortlist
+  under_consideration
+  not_selected
+}
+
+enum OfferType {
+  job
+  internship
+}
+
+enum OfferStatus {
+  pending_student_action
+  accepted
+  rejected_by_admin
+}
+
+enum JoiningStatus {
+  pending
+  joined
+  did_not_join
+}
+
+enum ComplianceStatus {
+  compliant
+  blocked
+  override_enabled
+}
+
+enum EventType {
+  campus_drive
+  ppt
+  test_assessment
+  internship_drive
+  workshop
+}
+
+enum EventStatus {
+  draft
+  published
+  ongoing
+  completed
+  cancelled
+}
+
+enum AttendanceStatus {
+  present
+  absent
+  late
+}
+
+enum NocType {
+  internship
+  training
+  project
+}
+
+enum PlacementSource {
+  university_drive
+  self_sourced
+}
+
+enum NocStatus {
+  pending_faculty
+  pending_tpo
+  pending_company_verification
+  approved
+  issued
+  rejected
+}
+
+enum CompanyVerificationStatus {
+  verified
+  pending
+  rejected
+}
+
+enum InternshipType {
+  paid
+  unpaid
+  stipend_based
+}
+
+enum InternshipStatus {
+  ongoing
+  completed
+  discontinued
+}
+
+// ============================================================
+// TENANT
+// ============================================================
+
+model Tenant {
+  id            String   @id @default(uuid())
+  slug          String   @unique @db.VarChar(50)
+  name          String   @db.VarChar(200)
+  short_name    String?  @db.VarChar(50)
+  logo_url      String?  @db.Text
+  tagline       String?  @db.Text
+  contact_email String?  @db.VarChar(255)
+  contact_phone String?  @db.VarChar(20)
+  website       String?  @db.Text
+  config        Json     @default("{}")
+  is_active     Boolean  @default(true)
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+
+  // Relations
+  users               User[]
+  students            Student[]
+  companies           Company[]
+  postings            Posting[]
+  events              Event[]
+  noc_requests        NocRequest[]
+  internships         Internship[]
+  announcements       Announcement[]
+  circular_templates  CircularTemplate[]
+  generated_circulars GeneratedCircular[]
+  noc_templates       NocTemplate[]
+  no_dues_requests    NoDuesRequest[]
+  policies            Policy[]
+  eligibility_rules   EligibilityRule[]
+  export_records      ExportRecord[]
+  audit_logs          AuditLog[]
+  role_permissions    RolePermission[]
+  master_options      MasterOption[]
+  notifications       Notification[]
+
+  @@map("tenants")
+}
+
+// ============================================================
+// USER
+// ============================================================
+
+model User {
+  id            String    @id @default(uuid())
+  tenant_id     String
+  email         String    @db.VarChar(255)
+  password_hash String    @db.VarChar(255)
+  role          UserRole
+  name          String    @db.VarChar(200)
+  phone         String?   @db.VarChar(20)
+  department    String?   @db.VarChar(100)
+  designation   String?   @db.VarChar(100)
+  crm_employee_code String? @db.VarChar(50)
+  institutes    String[]  @default([])
+  courses       String[]  @default([])
+  branches      String[]  @default([])
+  is_active     Boolean   @default(true)
+  last_login_at DateTime?
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @updatedAt
+
+  // Relations
+  tenant  Tenant   @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  student Student?
+
+  verified_students      Student[]                 @relation("VerifiedBy")
+  created_postings       Posting[]                 @relation("PostingCreatedBy")
+  created_engagements    CompanyEngagement[]       @relation("EngagementCreatedBy")
+  stage_changes          ApplicationStageHistory[] @relation("StageChangedBy")
+  offer_rejections       Offer[]                   @relation("OfferRejectedBy")
+  offer_creations        Offer[]                   @relation("OfferCreatedBy")
+  offer_audit_actions    OfferAudit[]              @relation("AuditPerformedBy")
+  created_events         Event[]                   @relation("EventCreatedBy")
+  attendance_marks       EventStudent[]            @relation("AttendanceMarkedBy")
+  noc_faculty_approvals  NocRequest[]              @relation("NocFacultyApprovedBy")
+  noc_tpo_approvals      NocRequest[]              @relation("NocTpoApprovedBy")
+  verified_recruiters    Recruiter[]               @relation("RecruiterVerifiedBy")
+  recruiter_profile      Recruiter?                @relation("RecruiterUser")
+  reported_issues        InternshipIssue[]         @relation("IssueReportedBy")
+  created_announcements  Announcement[]            @relation("AnnouncementCreatedBy")
+  created_templates      CircularTemplate[]        @relation("TemplateCreatedBy")
+  created_noc_templates  NocTemplate[]             @relation("NocTemplateCreatedBy")
+  updated_noc_templates  NocTemplate[]             @relation("NocTemplateUpdatedBy")
+  generated_circulars    GeneratedCircular[]       @relation("CircularGeneratedBy")
+  ndc_reviews            NoDuesRequest[]           @relation("NdcReviewedBy")
+  exported_records       ExportRecord[]            @relation("ExportedBy")
+  audit_logs             AuditLog[]                @relation("AuditUser")
+  notifications          Notification[]
+  refresh_tokens         RefreshToken[]
+  created_master_options MasterOption[]            @relation("MasterOptionCreatedBy")
+
+  @@unique([tenant_id, email])
+  @@unique([tenant_id, crm_employee_code])
+  @@index([tenant_id, role])
+  @@index([tenant_id, is_active])
+  @@map("users")
+}
+
+// ============================================================
+// STUDENT
+// ============================================================
+
+model Student {
+  id                            String             @id @default(uuid())
+  user_id                       String             @unique
+  tenant_id                     String
+  enrollment_number             String             @db.VarChar(50)
+  roll_number                   String?            @db.VarChar(50)
+  full_name                     String             @db.VarChar(200)
+  email                         String             @db.VarChar(255)
+  mobile                        String?            @db.VarChar(20)
+  date_of_birth                 DateTime?          @db.Date
+  gender                        String?            @db.VarChar(20)
+  category                      String?            @db.VarChar(50)
+  aadhaar_number                String?            @db.VarChar(20)
+  department                    String             @db.VarChar(100)
+  batch                         String             @db.VarChar(20)
+  course                        String?            @db.VarChar(100)
+  institute                     String?            @db.VarChar(200)
+  temporary_enrolment_no        String?            @db.VarChar(50)
+  parent_name                   String?            @db.VarChar(200)
+  parent_contact_no             String?            @db.VarChar(20)
+  blood_group                   String?            @db.VarChar(20)
+  program_name                  String?            @db.VarChar(100)
+  admission_year                Int?
+  current_semester              String?            @db.VarChar(50)
+  current_semester_spi          Decimal?           @db.Decimal(4, 2)
+  current_semester_cpi          Decimal?           @db.Decimal(4, 2)
+  current_semester_cgpa         Decimal?           @db.Decimal(4, 2)
+  exam_form_status              String?            @db.VarChar(100)
+  overall_attendance_percentage Decimal?           @db.Decimal(5, 2)
+  board10                       String?            @db.VarChar(200)
+  passing_year10                Int?
+  board12_or_diploma            String?            @db.VarChar(200)
+  passing_year12_or_diploma     Int?
+  linkedin_url                  String?            @db.Text
+  alternate_phone               String?            @db.VarChar(20)
+  residential_address           String?            @db.Text
+  permanent_address             String?            @db.Text
+  profile_photo_url             String?            @db.Text
+  profile_blocked               Boolean            @default(false)
+  profile_block_reason          String?            @db.Text
+  profile_completion_percentage Int                @default(0)
+  verification_status           VerificationStatus @default(pending)
+  verification_remarks          String?            @db.Text
+  verified_by                   String?
+  verified_at                   DateTime?
+  policy_accepted               Boolean            @default(false)
+  policy_accepted_at            DateTime?
+  no_dues_enabled               Boolean            @default(false)
+  created_at                    DateTime           @default(now())
+  updated_at                    DateTime           @updatedAt
+
+  // Relations
+  user             User   @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  tenant           Tenant @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  verified_by_user User?  @relation("VerifiedBy", fields: [verified_by], references: [id])
+
+  academic_profile       AcademicProfile?
+  skills_profile         SkillsProfile?
+  current_employment     CurrentEmployment?
+  projects               StudentProject[]
+  certifications         Certification[]
+  resumes                Resume[]
+  policy_acceptances     PolicyAcceptance[]
+  interest_registrations InterestRegistration[]
+  applications           Application[]
+  offers                 Offer[]
+  event_assignments      EventStudent[]
+  noc_requests           NocRequest[]
+  internships            Internship[]
+  portfolio              Portfolio?
+  announcement_receipts  AnnouncementReceipt[]
+  no_dues_requests       NoDuesRequest[]
+
+  @@unique([tenant_id, enrollment_number])
+  @@index([tenant_id, department])
+  @@index([tenant_id, batch])
+  @@index([tenant_id, verification_status])
+  @@index([tenant_id, profile_blocked])
+  @@index([tenant_id, no_dues_enabled])
+  @@index([profile_completion_percentage])
+  @@map("students")
+}
+
+// ============================================================
+// ACADEMIC PROFILE
+// ============================================================
+
+model AcademicProfile {
+  id                 String   @id @default(uuid())
+  student_id         String   @unique
+  cgpa               Decimal? @db.Decimal(4, 2)
+  tenth_percentage   Decimal? @db.Decimal(5, 2)
+  twelfth_percentage Decimal? @db.Decimal(5, 2)
+  diploma_percentage Decimal? @db.Decimal(5, 2)
+  backlog_count      Int      @default(0)
+  active_backlogs    Int      @default(0)
+  semester           Int?
+  year_of_study      Int?
+  course_duration    Int?
+  created_at         DateTime @default(now())
+  updated_at         DateTime @updatedAt
+
+  student Student @relation(fields: [student_id], references: [id], onDelete: Cascade)
+
+  @@map("academic_profiles")
+}
+
+// ============================================================
+// SKILLS PROFILE
+// ============================================================
+
+model SkillsProfile {
+  id                  String   @id @default(uuid())
+  student_id          String   @unique
+  technical_skills    String[] @default([])
+  domain_interests    String[] @default([])
+  preferred_locations String[] @default([])
+  created_at          DateTime @default(now())
+  updated_at          DateTime @updatedAt
+
+  student Student @relation(fields: [student_id], references: [id], onDelete: Cascade)
+
+  @@map("skills_profiles")
+}
+
+// ============================================================
+// STUDENT PROJECTS
+// ============================================================
+
+model StudentProject {
+  id           String    @id @default(uuid())
+  student_id   String
+  portfolio_id String?
+  title        String    @db.VarChar(200)
+  description  String?   @db.Text
+  role         String?   @db.VarChar(200)
+  technologies String[]  @default([])
+  keywords     String[]  @default([])
+  github_url   String?   @db.Text
+  demo_url     String?   @db.Text
+  live_url     String?   @db.Text
+  start_date   DateTime? @db.Date
+  end_date     DateTime? @db.Date
+  is_ongoing   Boolean   @default(false)
+  attachments  Json      @default("[]")
+  display_order Int      @default(0)
+  created_at   DateTime  @default(now())
+  updated_at   DateTime  @updatedAt
+
+  student Student @relation(fields: [student_id], references: [id], onDelete: Cascade)
+  portfolio Portfolio? @relation("StudentPortfolioProjects", fields: [portfolio_id], references: [id], onDelete: Cascade)
+
+  @@index([student_id])
+  @@index([portfolio_id])
+  @@map("student_projects")
+}
+
+// ============================================================
+// CERTIFICATIONS
+// ============================================================
+
+model Certification {
+  id                  String    @id @default(uuid())
+  student_id          String
+  name                String    @db.VarChar(200)
+  issuer              String    @db.VarChar(200)
+  issue_date          DateTime? @db.Date
+  credential_url      String?   @db.Text
+  document_url        String?   @db.Text
+  document_name       String?   @db.VarChar(255)
+  document_mime_type  String?   @db.VarChar(150)
+  document_size       Int?
+  created_at          DateTime  @default(now())
+
+  student Student @relation(fields: [student_id], references: [id], onDelete: Cascade)
+
+  @@index([student_id])
+  @@map("certifications")
+}
+
+// ============================================================
+// RESUMES
+// ============================================================
+
+model Resume {
+  id          String   @id @default(uuid())
+  student_id  String
+  name        String   @db.VarChar(200)
+  file_url    String   @db.Text
+  file_size   Int?
+  mime_type   String?  @db.VarChar(50)
+  is_default  Boolean  @default(false)
+  ai_score    Int?
+  uploaded_at DateTime @default(now())
+
+  student      Student       @relation(fields: [student_id], references: [id], onDelete: Cascade)
+  applications Application[]
+
+  @@index([student_id])
+  @@map("resumes")
+}
+
+// ============================================================
+// CURRENT EMPLOYMENT
+// ============================================================
+
+model CurrentEmployment {
+  id                   String   @id @default(uuid())
+  student_id           String   @unique
+  is_currently_working Boolean  @default(false)
+  employment_type      String?  @db.VarChar(50)
+  company_name         String?  @db.VarChar(200)
+  designation          String?  @db.VarChar(200)
+  duration             String?  @db.VarChar(100)
+  package_lpa          Decimal? @db.Decimal(10, 2)
+  offer_letter_url     String?  @db.Text
+  business_proof_url   String?  @db.Text
+  updated_at           DateTime @updatedAt
+
+  student Student @relation(fields: [student_id], references: [id], onDelete: Cascade)
+
+  @@map("current_employment")
+}
+
+// ============================================================
+// POLICY ACCEPTANCES
+// ============================================================
+
+model PolicyAcceptance {
+  id                      String   @id @default(uuid())
+  student_id              String
+  policy_id               String?
+  policy_version          String?  @db.VarChar(20)
+  policy_updated_at       DateTime?
+  policy_read             Boolean  @default(false)
+  rules_accepted          Boolean  @default(false)
+  profile_sharing_consent Boolean  @default(false)
+  resume_sharing_consent  Boolean  @default(false)
+  data_storage_consent    Boolean  @default(false)
+  communication_consent   Boolean  @default(false)
+  accepted_at             DateTime @default(now())
+  ip_address              String?  @db.VarChar(50)
+
+  student Student @relation(fields: [student_id], references: [id], onDelete: Cascade)
+  policy  Policy? @relation(fields: [policy_id], references: [id], onDelete: Cascade)
+
+  @@index([student_id])
+  @@index([policy_id])
+  @@index([student_id, policy_id])
+  @@map("policy_acceptances")
+}
+
+// ============================================================
+// INTEREST REGISTRATIONS
+// ============================================================
+
+model InterestRegistration {
+  id            String       @id @default(uuid())
+  student_id    String
+  interest_type String       @db.Text
+  registered_at DateTime     @default(now())
+
+  student Student @relation(fields: [student_id], references: [id], onDelete: Cascade)
+
+  @@unique([student_id, interest_type])
+  @@map("interest_registrations")
+}
+
+// ============================================================
+// COMPANIES
+// ============================================================
+
+model Company {
+  id               String                @id @default(uuid())
+  tenant_id        String
+  name             String                @db.VarChar(300)
+  industry         String?               @db.VarChar(100)
+  address          String?               @db.Text
+  website          String?               @db.Text
+  description      String?               @db.Text
+  status           CompanyStatus         @default(active)
+  classification   CompanyClassification @default(normal)
+  internal_remarks String?               @db.Text
+  created_at       DateTime              @default(now())
+  updated_at       DateTime              @updatedAt
+
+  tenant              Tenant              @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  recruiters          Recruiter[]
+  engagements         CompanyEngagement[]
+  postings            Posting[]
+  offers              Offer[]
+  events              Event[]
+  internships         Internship[]
+  generated_circulars GeneratedCircular[]
+
+  @@index([tenant_id, name])
+  @@index([tenant_id, status])
+  @@index([tenant_id, classification])
+  @@map("companies")
+}
+
+// ============================================================
+// RECRUITERS
+// ============================================================
+
+model Recruiter {
+  id                  String             @id @default(uuid())
+  user_id             String?            @unique
+  company_id          String
+  tenant_id           String
+  name                String             @db.VarChar(200)
+  email               String             @db.VarChar(255)
+  phone               String?            @db.VarChar(20)
+  designation         String?            @db.VarChar(100)
+  verification_status VerificationStatus @default(pending)
+  verified_by         String?
+  verified_at         DateTime?
+  created_at          DateTime           @default(now())
+  updated_at          DateTime           @updatedAt
+
+  user             User?               @relation("RecruiterUser", fields: [user_id], references: [id])
+  company          Company             @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  verified_by_user User?               @relation("RecruiterVerifiedBy", fields: [verified_by], references: [id])
+  feedback         RecruiterFeedback[]
+
+  @@unique([tenant_id, email])
+  @@index([company_id])
+  @@index([verification_status])
+  @@map("recruiters")
+}
+
+// ============================================================
+// COMPANY ENGAGEMENTS
+// ============================================================
+
+model CompanyEngagement {
+  id               String         @id @default(uuid())
+  company_id       String
+  tenant_id        String
+  visitor_type     EngagementType
+  date             DateTime       @db.Date
+  remarks          String?        @db.Text
+  students_hired   Int            @default(0)
+  packages_offered String?        @db.Text
+  academic_year    String?        @db.VarChar(20)
+  created_by       String?
+
+  company         Company  @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  created_by_user User?    @relation("EngagementCreatedBy", fields: [created_by], references: [id])
+  created_at      DateTime @default(now())
+
+  @@index([company_id])
+  @@map("company_engagements")
+}
+
+// ============================================================
+// POSTINGS (Job / Internship)
+// ============================================================
+
+model Posting {
+  id                     String        @id @default(uuid())
+  tenant_id              String
+  company_id             String
+  title                  String        @db.VarChar(200)
+  type                   PostingType
+  academic_year          String        @db.VarChar(20)
+  role_name              String        @db.VarChar(200)
+  location               String        @db.VarChar(200)
+  work_mode              WorkMode
+  ctc                    String?       @db.VarChar(100)
+  stipend                String?       @db.VarChar(100)
+  duration               String?       @db.VarChar(100)
+  bond_details           String?       @db.Text
+  role_description       String?       @db.Text
+  job_description_pdf_url String?      @db.Text
+  target_institutes      String[]      @default([])
+  target_courses         String[]      @default([])
+  target_branches        String[]      @default([])
+  target_semesters       String[]      @default([])
+  eligible_branches      String[]      @default([])
+  eligible_batches       String[]      @default([])
+  min_cgpa               Decimal       @default(0) @db.Decimal(4, 2)
+  max_backlogs           Int           @default(0)
+  skill_requirements     String?       @db.Text
+  has_written_test       Boolean       @default(false)
+  written_test_details   String?       @db.Text
+  has_gd                 Boolean       @default(false)
+  gd_details             String?       @db.Text
+  technical_rounds       Int           @default(0)
+  hr_rounds              Int           @default(0)
+  additional_info        String?       @db.Text
+  application_override_enabled Boolean @default(false)
+  application_start_date DateTime?     @db.Date
+  application_end_date   DateTime?     @db.Date
+  status                 PostingStatus @default(draft)
+  published_at           DateTime?
+  closed_at              DateTime?
+  created_by             String?
+  created_at             DateTime      @default(now())
+  updated_at             DateTime      @updatedAt
+
+  tenant               Tenant         @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  company              Company        @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  created_by_user      User?          @relation("PostingCreatedBy", fields: [created_by], references: [id])
+  applications         Application[]
+  offers               Offer[]
+  events               Event[]        @relation("EventPosting")
+  target_announcements Announcement[] @relation("AnnouncementTargetPosting")
+  export_records       ExportRecord[]
+
+  @@index([tenant_id, status])
+  @@index([tenant_id, type])
+  @@index([company_id])
+  @@index([tenant_id, academic_year])
+  @@map("postings")
+}
+
+// ============================================================
+// APPLICATIONS
+// ============================================================
+
+model Application {
+  id                String           @id @default(uuid())
+  tenant_id         String
+  student_id        String
+  posting_id        String
+  resume_id         String?
+  current_stage     ApplicationStage @default(applied)
+  mock_round_result MockRoundResult?
+  applied_at        DateTime         @default(now())
+  updated_at        DateTime         @updatedAt
+
+  student       Student                   @relation(fields: [student_id], references: [id], onDelete: Cascade)
+  posting       Posting                   @relation(fields: [posting_id], references: [id], onDelete: Cascade)
+  resume        Resume?                   @relation(fields: [resume_id], references: [id])
+  stage_history ApplicationStageHistory[]
+  feedback      RecruiterFeedback[]
+
+  @@unique([student_id, posting_id])
+  @@index([posting_id, current_stage])
+  @@index([student_id])
+  @@index([tenant_id, current_stage])
+  @@map("applications")
+}
+
+// ============================================================
+// APPLICATION STAGE HISTORY
+// ============================================================
+
+model ApplicationStageHistory {
+  id             String   @id @default(uuid())
+  application_id String
+  from_stage     String?  @db.VarChar(30)
+  to_stage       String   @db.VarChar(30)
+  changed_by     String?
+  remarks        String?  @db.Text
+  changed_at     DateTime @default(now())
+
+  application     Application @relation(fields: [application_id], references: [id], onDelete: Cascade)
+  changed_by_user User?       @relation("StageChangedBy", fields: [changed_by], references: [id])
+
+  @@index([application_id])
+  @@map("application_stage_history")
+}
+
+// ============================================================
+// RECRUITER FEEDBACK
+// ============================================================
+
+model RecruiterFeedback {
+  id             String           @id @default(uuid())
+  application_id String
+  recruiter_id   String
+  decision       FeedbackDecision
+  remarks        String?          @db.Text
+  submitted_at   DateTime         @default(now())
+
+  application Application @relation(fields: [application_id], references: [id], onDelete: Cascade)
+  recruiter   Recruiter   @relation(fields: [recruiter_id], references: [id], onDelete: Cascade)
+
+  @@map("recruiter_feedback")
+}
+
+// ============================================================
+// OFFERS
+// ============================================================
+
+model Offer {
+  id                     String           @id @default(uuid())
+  tenant_id              String
+  student_id             String
+  posting_id             String
+  company_id             String
+  type                   OfferType
+  role                   String           @db.VarChar(200)
+  ctc                    String?          @db.VarChar(100)
+  stipend                String?          @db.VarChar(100)
+  location               String?          @db.VarChar(200)
+  offer_date             DateTime         @db.Date
+  status                 OfferStatus      @default(pending_student_action)
+  accepted_at            DateTime?
+  rejected_at            DateTime?
+  rejection_reason       String?          @db.VarChar(50)
+  rejection_remarks      String?          @db.Text
+  rejected_by            String?
+  joining_status         JoiningStatus    @default(pending)
+  joining_date           DateTime?        @db.Date
+  dnj_reason             String?          @db.Text
+  is_locked              Boolean          @default(false)
+  compliance_status      ComplianceStatus @default(compliant)
+  applications_blocked   Boolean          @default(false)
+  admin_override_enabled Boolean          @default(false)
+  created_by             String?
+  created_at             DateTime         @default(now())
+  updated_at             DateTime         @updatedAt
+
+  student          Student      @relation(fields: [student_id], references: [id], onDelete: Cascade)
+  posting          Posting      @relation(fields: [posting_id], references: [id], onDelete: Cascade)
+  company          Company      @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  rejected_by_user User?        @relation("OfferRejectedBy", fields: [rejected_by], references: [id])
+  created_by_user  User?        @relation("OfferCreatedBy", fields: [created_by], references: [id])
+  audit_trail      OfferAudit[]
+  internships      Internship[]
+
+  @@index([student_id, status])
+  @@index([company_id])
+  @@index([posting_id])
+  @@index([tenant_id, status])
+  @@map("offers")
+}
+
+// ============================================================
+// OFFER AUDIT
+// ============================================================
+
+model OfferAudit {
+  id           String   @id @default(uuid())
+  offer_id     String
+  action       String   @db.VarChar(50)
+  performed_by String?
+  details      String?  @db.Text
+  performed_at DateTime @default(now())
+
+  offer             Offer @relation(fields: [offer_id], references: [id], onDelete: Cascade)
+  performed_by_user User? @relation("AuditPerformedBy", fields: [performed_by], references: [id])
+
+  @@index([offer_id])
+  @@map("offer_audit")
+}
+
+// ============================================================
+// EVENTS
+// ============================================================
+
+model Event {
+  id                   String      @id @default(uuid())
+  tenant_id            String
+  company_id           String
+  posting_id           String?
+  title                String      @db.VarChar(300)
+  type                 EventType
+  status               EventStatus @default(draft)
+  date                 DateTime    @db.Date
+  start_time           String      @db.VarChar(10)
+  end_time             String      @db.VarChar(10)
+  venue                String      @db.VarChar(300)
+  reporting_time       String?     @db.VarChar(10)
+  dress_code           String?     @db.VarChar(200)
+  instructions         String?     @db.Text
+  documents_required   String[]    @default([])
+  faculty_coordinators String[]    @default([])
+  created_by           String?
+  created_at           DateTime    @default(now())
+  updated_at           DateTime    @updatedAt
+
+  tenant            Tenant         @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  company           Company        @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  posting           Posting?       @relation("EventPosting", fields: [posting_id], references: [id])
+  created_by_user   User?          @relation("EventCreatedBy", fields: [created_by], references: [id])
+  panels            EventPanel[]
+  assigned_students EventStudent[]
+
+  @@index([tenant_id, date])
+  @@index([tenant_id, status])
+  @@index([company_id])
+  @@map("events")
+}
+
+// ============================================================
+// EVENT PANELS
+// ============================================================
+
+model EventPanel {
+  id         String   @id @default(uuid())
+  event_id   String
+  panel_name String   @db.VarChar(100)
+  room       String   @db.VarChar(100)
+  start_time String?  @db.VarChar(10)
+  end_time   String?  @db.VarChar(10)
+  recruiters String[] @default([])
+  created_at DateTime @default(now())
+
+  event    Event          @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  students EventStudent[]
+
+  @@index([event_id])
+  @@map("event_panels")
+}
+
+// ============================================================
+// EVENT STUDENTS (Junction)
+// ============================================================
+
+model EventStudent {
+  id         String            @id @default(uuid())
+  event_id   String
+  student_id String
+  panel_id   String?
+  slot_time  String?           @db.VarChar(10)
+  attendance AttendanceStatus?
+  marked_by  String?
+  marked_at  DateTime?
+
+  event          Event       @relation(fields: [event_id], references: [id], onDelete: Cascade)
+  student        Student     @relation(fields: [student_id], references: [id], onDelete: Cascade)
+  panel          EventPanel? @relation(fields: [panel_id], references: [id])
+  marked_by_user User?       @relation("AttendanceMarkedBy", fields: [marked_by], references: [id])
+
+  @@unique([event_id, student_id])
+  @@map("event_students")
+}
+
+// ============================================================
+// NOC REQUESTS
+// ============================================================
+
+model NocRequest {
+  id                          String                    @id @default(uuid())
+  tenant_id                   String
+  student_id                  String
+  noc_type                    NocType
+  program                     String                    @db.VarChar(150)
+  placement_source            PlacementSource
+  drive_id                    String?
+  company_name                String                    @db.VarChar(300)
+  company_address             String?                   @db.Text
+  company_city                String?                   @db.VarChar(100)
+  company_state               String?                   @db.VarChar(100)
+  company_pincode             String?                   @db.VarChar(10)
+  company_verification_status CompanyVerificationStatus @default(pending)
+  contact_person_name         String?                   @db.VarChar(200)
+  contact_person_designation  String?                   @db.VarChar(100)
+  contact_person_phone        String?                   @db.VarChar(20)
+  contact_person_email        String?                   @db.VarChar(255)
+  reference_by                String?                   @db.VarChar(50)
+  reference_details           String?                   @db.Text
+  role_title                  String                    @db.VarChar(200)
+  technology_domain           String?                   @db.VarChar(200)
+  job_description             String?                   @db.Text
+  stipend_amount              Decimal?                  @db.Decimal(10, 2)
+  start_date                  DateTime                  @db.Date
+  end_date                    DateTime                  @db.Date
+  duration_weeks              Int?
+  offer_letter_url            String?                   @db.Text
+  status                      NocStatus                 @default(pending_faculty)
+  faculty_approved_by         String?
+  faculty_approved_at         DateTime?
+  faculty_remarks             String?                   @db.Text
+  tpo_approved_by             String?
+  tpo_approved_at             DateTime?
+  tpo_remarks                 String?                   @db.Text
+  noc_number                  String?                   @unique @db.VarChar(50)
+  issued_at                   DateTime?
+  certificate_url             String?                   @db.Text
+  certificate_snapshot        Json?
+  noc_template_id             String?
+  rejected_at                 DateTime?
+  rejection_reason            String?                   @db.Text
+  created_at                  DateTime                  @default(now())
+  updated_at                  DateTime                  @updatedAt
+
+  tenant                   Tenant  @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  student                  Student @relation(fields: [student_id], references: [id], onDelete: Cascade)
+  noc_template             NocTemplate? @relation(fields: [noc_template_id], references: [id], onDelete: SetNull)
+  faculty_approved_by_user User?   @relation("NocFacultyApprovedBy", fields: [faculty_approved_by], references: [id])
+  tpo_approved_by_user     User?   @relation("NocTpoApprovedBy", fields: [tpo_approved_by], references: [id])
+
+  @@index([student_id])
+  @@index([tenant_id, status])
+  @@index([noc_template_id])
+  @@map("noc_requests")
+}
+
+// ============================================================
+// INTERNSHIPS
+// ============================================================
+
+model Internship {
+  id                   String           @id @default(uuid())
+  tenant_id            String
+  student_id           String
+  company_id           String?
+  company_name         String           @db.VarChar(300)
+  role                 String           @db.VarChar(200)
+  department           String?          @db.VarChar(100)
+  internship_type      InternshipType
+  status               InternshipStatus @default(ongoing)
+  start_date           DateTime         @db.Date
+  end_date             DateTime?        @db.Date
+  stipend_amount       Decimal?         @db.Decimal(10, 2)
+  stipend_frequency    String?          @db.VarChar(20)
+  is_receiving_stipend Boolean          @default(false)
+  certificate_uploaded Boolean          @default(false)
+  certificate_url      String?          @db.Text
+  offer_id             String?
+  created_at           DateTime         @default(now())
+  updated_at           DateTime         @updatedAt
+
+  tenant    Tenant               @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  student   Student              @relation(fields: [student_id], references: [id], onDelete: Cascade)
+  company   Company?             @relation(fields: [company_id], references: [id])
+  offer     Offer?               @relation(fields: [offer_id], references: [id])
+  issues    InternshipIssue[]
+  showcases InternshipShowcase[]
+
+  @@index([student_id])
+  @@index([tenant_id, status])
+  @@index([company_id])
+  @@map("internships")
+}
+
+// ============================================================
+// ENUMS - Support
+// ============================================================
+
+enum IssueStatus {
+  open
+  resolved
+}
+
+enum AnnouncementPriority {
+  high
+  medium
+  low
+}
+
+enum AnnouncementStatus {
+  draft
+  published
+  archived
+}
+
+enum TargetAudienceType {
+  all
+  batch
+  department
+  eligible_for_posting
+}
+
+enum CircularTemplateType {
+  placement
+  internship
+  stipend_internship
+  nep_internship
+}
+
+enum CircularTemplateStatus {
+  draft
+  active
+  archived
+}
+
+enum ExitReason {
+  employment
+  family_business
+  higher_studies
+}
+
+enum NdcStatus {
+  pending_review
+  under_review
+  approved
+  returned
+  rejected
+  issued
+}
+
+enum PortfolioStatus {
+  draft
+  published
+}
+
+enum ExportFormat {
+  xlsx
+  pdf
+}
+
+enum NotificationType {
+  profile
+  policy
+  readiness
+  placement
+}
+
+enum NotificationPriority {
+  high
+  medium
+  low
+}
+
+// ============================================================
+// INTERNSHIP ISSUES
+// ============================================================
+
+model InternshipIssue {
+  id            String      @id @default(uuid())
+  internship_id String
+  title         String      @db.VarChar(300)
+  description   String?     @db.Text
+  status        IssueStatus @default(open)
+  reported_by   String?
+  resolved_at   DateTime?
+  created_at    DateTime    @default(now())
+
+  internship       Internship @relation(fields: [internship_id], references: [id], onDelete: Cascade)
+  reported_by_user User?      @relation("IssueReportedBy", fields: [reported_by], references: [id])
+
+  @@index([internship_id])
+  @@map("internship_issues")
+}
+
+// ============================================================
+// ANNOUNCEMENTS
+// ============================================================
+
+model Announcement {
+  id                   String               @id @default(uuid())
+  tenant_id            String
+  title                String               @db.VarChar(200)
+  content              String               @db.Text
+  priority             AnnouncementPriority @default(medium)
+  status               AnnouncementStatus   @default(draft)
+  target_audience_type TargetAudienceType   @default(all)
+  target_institutes    String[]             @default([])
+  target_courses       String[]             @default([])
+  target_branches      String[]             @default([])
+  target_batches       String[]             @default([])
+  target_departments   String[]             @default([])
+  target_posting_id    String?
+  requires_consent     Boolean              @default(false)
+  linked_circular_id   String?
+  total_recipients     Int                  @default(0)
+  read_count           Int                  @default(0)
+  consent_count        Int                  @default(0)
+  created_by           String?
+  published_at         DateTime?
+  archived_at          DateTime?
+  created_at           DateTime             @default(now())
+  updated_at           DateTime             @updatedAt
+
+  tenant          Tenant                @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  target_posting  Posting?              @relation("AnnouncementTargetPosting", fields: [target_posting_id], references: [id])
+  linked_circular GeneratedCircular?    @relation(fields: [linked_circular_id], references: [id])
+  created_by_user User?                 @relation("AnnouncementCreatedBy", fields: [created_by], references: [id])
+  receipts        AnnouncementReceipt[]
+
+  @@index([tenant_id, status])
+  @@index([tenant_id, priority])
+  @@map("announcements")
+}
+
+// ============================================================
+// ANNOUNCEMENT RECEIPTS
+// ============================================================
+
+model AnnouncementReceipt {
+  id              String    @id @default(uuid())
+  announcement_id String
+  student_id      String
+  is_read         Boolean   @default(false)
+  read_at         DateTime?
+  has_consented   Boolean   @default(false)
+  consented_at    DateTime?
+
+  announcement Announcement @relation(fields: [announcement_id], references: [id], onDelete: Cascade)
+  student      Student      @relation(fields: [student_id], references: [id], onDelete: Cascade)
+
+  @@unique([announcement_id, student_id])
+  @@map("announcement_receipts")
+}
+
+// ============================================================
+// CIRCULAR TEMPLATES
+// ============================================================
+
+model CircularTemplate {
+  id         String                 @id @default(uuid())
+  tenant_id  String
+  name       String                 @db.VarChar(200)
+  type       CircularTemplateType
+  status     CircularTemplateStatus @default(draft)
+  version    String                 @default("1.0") @db.VarChar(20)
+  sections   Json                   @default("[]")
+  used_count Int                    @default(0)
+  created_by String?
+  created_at DateTime               @default(now())
+  updated_at DateTime               @updatedAt
+
+  tenant              Tenant              @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  created_by_user     User?               @relation("TemplateCreatedBy", fields: [created_by], references: [id])
+  generated_circulars GeneratedCircular[]
+
+  @@index([tenant_id, status])
+  @@map("circular_templates")
+}
+
+// ============================================================
+// GENERATED CIRCULARS
+// ============================================================
+
+model GeneratedCircular {
+  id           String   @id @default(uuid())
+  tenant_id    String
+  template_id  String?
+  company_id   String
+  company_name String   @db.VarChar(300)
+  role_name    String   @db.VarChar(200)
+  type         String   @db.VarChar(30)
+  field_values Json     @default("{}")
+  generated_by String?
+  generated_at DateTime @default(now())
+
+  tenant            Tenant           @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  template          CircularTemplate? @relation(fields: [template_id], references: [id], onDelete: SetNull)
+  company           Company          @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  generated_by_user User?            @relation("CircularGeneratedBy", fields: [generated_by], references: [id])
+  announcements     Announcement[]
+
+  @@index([tenant_id])
+  @@index([template_id])
+  @@map("generated_circulars")
+}
+
+// ============================================================
+// NO DUES REQUESTS
+// ============================================================
+
+model NoDuesRequest {
+  id                   String     @id @default(uuid())
+  tenant_id            String
+  student_id           String
+  exit_reason          ExitReason
+  company_name         String?    @db.VarChar(300)
+  designation          String?    @db.VarChar(200)
+  package_lpa          Decimal?   @db.Decimal(10, 2)
+  joining_date         DateTime?  @db.Date
+  business_name        String?    @db.VarChar(300)
+  business_nature      String?    @db.VarChar(200)
+  business_address     String?    @db.Text
+  institution_name     String?    @db.VarChar(300)
+  program_name         String?    @db.VarChar(200)
+  country              String?    @db.VarChar(100)
+  proof_url            String?    @db.Text
+  declaration_accepted Boolean    @default(false)
+  status               NdcStatus  @default(pending_review)
+  admin_remarks        String?    @db.Text
+  reviewed_by          String?
+  reviewed_at          DateTime?
+  ndc_number           String?    @unique @db.VarChar(50)
+  issued_at            DateTime?
+  certificate_url      String?    @db.Text
+  created_at           DateTime   @default(now())
+  updated_at           DateTime   @updatedAt
+
+  tenant           Tenant  @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  student          Student @relation(fields: [student_id], references: [id], onDelete: Cascade)
+  reviewed_by_user User?   @relation("NdcReviewedBy", fields: [reviewed_by], references: [id])
+
+  @@index([student_id])
+  @@index([tenant_id, status])
+  @@map("no_dues_requests")
+}
+
+// ============================================================
+// PORTFOLIOS
+// ============================================================
+
+model Portfolio {
+  id               String          @id @default(uuid())
+  student_id       String          @unique
+  status           PortfolioStatus @default(published)
+  project_count    Int             @default(0)
+  internship_count Int             @default(0)
+  created_at       DateTime        @default(now())
+  updated_at       DateTime        @updatedAt
+
+  student   Student              @relation(fields: [student_id], references: [id], onDelete: Cascade)
+  projects  StudentProject[]     @relation("StudentPortfolioProjects")
+  showcases InternshipShowcase[]
+
+  @@map("portfolios")
+}
+
+// ============================================================
+// INTERNSHIP SHOWCASES
+// ============================================================
+
+model InternshipShowcase {
+  id                   String    @id @default(uuid())
+  portfolio_id         String
+  company_name         String    @db.VarChar(300)
+  role                 String    @db.VarChar(200)
+  duration_months      Int?
+  start_date           DateTime? @db.Date
+  end_date             DateTime? @db.Date
+  key_outcomes         String[]  @default([])
+  proof_url            String?   @db.Text
+  is_verified          Boolean   @default(false)
+  linked_internship_id String?
+  created_at           DateTime  @default(now())
+  updated_at           DateTime  @updatedAt
+
+  portfolio         Portfolio   @relation(fields: [portfolio_id], references: [id], onDelete: Cascade)
+  linked_internship Internship? @relation(fields: [linked_internship_id], references: [id])
+
+  @@index([portfolio_id])
+  @@map("internship_showcases")
+}
+
+// ============================================================
+// POLICIES
+// ============================================================
+
+model Policy {
+  id                 String    @id @default(uuid())
+  tenant_id          String
+  title              String    @db.VarChar(200)
+  category           String    @db.VarChar(50)
+  description        String?   @db.Text
+  content            String    @db.Text
+  version            String    @default("1.0") @db.VarChar(20)
+  effective_date     DateTime? @db.Date
+  target_institutes  String[]  @default([])
+  target_branches    String[]  @default([])
+  target_courses     String[]  @default([])
+  document_url       String?   @db.Text
+  document_name      String?   @db.VarChar(255)
+  document_mime_type String?   @db.VarChar(150)
+  document_size      Int?
+  updated_by         String?   @db.VarChar(200)
+  created_at         DateTime  @default(now())
+  updated_at         DateTime  @updatedAt
+
+  tenant Tenant @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  acceptances PolicyAcceptance[]
+
+  @@index([tenant_id])
+  @@map("policies")
+}
+
+// ============================================================
+// ELIGIBILITY RULES
+// ============================================================
+
+model EligibilityRule {
+  id                  String   @id @default(uuid())
+  tenant_id           String
+  rule_name           String   @db.VarChar(200)
+  company_name        String?  @db.VarChar(300)
+  min_cgpa            Decimal  @default(0) @db.Decimal(4, 2)
+  max_backlogs        Int      @default(0)
+  eligible_branches   String[] @default([])
+  eligible_batches    String[] @default([])
+  min_tenth           Decimal? @db.Decimal(5, 2)
+  min_twelfth         Decimal? @db.Decimal(5, 2)
+  additional_criteria String?  @db.Text
+  is_active           Boolean  @default(true)
+  created_at          DateTime @default(now())
+  updated_at          DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+
+  @@index([tenant_id, is_active])
+  @@map("eligibility_rules")
+}
+
+// ============================================================
+// MASTER OPTIONS
+// ============================================================
+
+model MasterOption {
+  id               String         @id @default(uuid())
+  tenant_id        String
+  category         MasterCategory
+  value            String         @db.VarChar(150)
+  normalized_value String         @db.VarChar(150)
+  target_institutes String[]      @default([])
+  target_courses   String[]       @default([])
+  target_branches  String[]       @default([])
+  target_semesters  String[]       @default([])
+  is_active        Boolean        @default(true)
+  created_by       String?
+  created_at       DateTime       @default(now())
+  updated_at       DateTime       @updatedAt
+
+  tenant          Tenant @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  created_by_user User?  @relation("MasterOptionCreatedBy", fields: [created_by], references: [id], onDelete: SetNull)
+  noc_templates   NocTemplate[]
+
+  @@unique([tenant_id, category, normalized_value])
+  @@index([tenant_id, category, is_active])
+  @@map("master_options")
+}
+
+// ============================================================
+// NOC TEMPLATES
+// ============================================================
+
+model NocTemplate {
+  id                     String   @id @default(uuid())
+  tenant_id              String
+  posting_type_master_id String
+  branch_scope           String   @default("ALL") @db.VarChar(200)
+  name                   String   @db.VarChar(200)
+  subject                String   @db.Text
+  body_html              String   @db.Text
+  created_by             String?
+  updated_by             String?
+  created_at             DateTime @default(now())
+  updated_at             DateTime @updatedAt
+
+  tenant              Tenant       @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  posting_type_master MasterOption @relation(fields: [posting_type_master_id], references: [id], onDelete: Cascade)
+  created_by_user     User?        @relation("NocTemplateCreatedBy", fields: [created_by], references: [id], onDelete: SetNull)
+  updated_by_user     User?        @relation("NocTemplateUpdatedBy", fields: [updated_by], references: [id], onDelete: SetNull)
+  noc_requests        NocRequest[]
+
+  @@unique([tenant_id, posting_type_master_id, branch_scope])
+  @@index([tenant_id])
+  @@map("noc_templates")
+}
+
+// ============================================================
+// EXPORT RECORDS
+// ============================================================
+
+model ExportRecord {
+  id              String       @id @default(uuid())
+  tenant_id       String
+  posting_id      String?
+  company_name    String?      @db.VarChar(300)
+  role_name       String?      @db.VarChar(200)
+  exported_by     String
+  format          ExportFormat
+  record_count    Int
+  fields_included String[]     @default([])
+  exported_at     DateTime     @default(now())
+
+  tenant           Tenant   @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  posting          Posting? @relation(fields: [posting_id], references: [id])
+  exported_by_user User     @relation("ExportedBy", fields: [exported_by], references: [id])
+
+  @@index([tenant_id])
+  @@map("export_records")
+}
+
+// ============================================================
+// AUDIT LOGS
+// ============================================================
+
+model AuditLog {
+  id          String   @id @default(uuid())
+  tenant_id   String
+  user_id     String?
+  user_name   String?  @db.VarChar(200)
+  action      String   @db.VarChar(50)
+  module      String   @db.VarChar(50)
+  target_type String?  @db.VarChar(50)
+  target_id   String?
+  details     String?  @db.Text
+  ip_address  String?  @db.VarChar(50)
+  created_at  DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  user   User?  @relation("AuditUser", fields: [user_id], references: [id])
+
+  @@index([tenant_id, created_at(sort: Desc)])
+  @@index([tenant_id, module])
+  @@index([tenant_id, action])
+  @@index([user_id])
+  @@map("audit_logs")
+}
+
+// ============================================================
+// ROLE PERMISSIONS
+// ============================================================
+
+model RolePermission {
+  id          String   @id @default(uuid())
+  tenant_id   String
+  role        String   @db.VarChar(30)
+  module      String   @db.VarChar(50)
+  can_view    Boolean  @default(false)
+  can_create  Boolean  @default(false)
+  can_edit    Boolean  @default(false)
+  can_delete  Boolean  @default(false)
+  can_export  Boolean  @default(false)
+  can_approve Boolean  @default(false)
+  updated_at  DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+
+  @@unique([tenant_id, role, module])
+  @@map("role_permissions")
+}
+
+// ============================================================
+// NOTIFICATIONS
+// ============================================================
+
+model Notification {
+  id          String               @id @default(uuid())
+  tenant_id   String
+  user_id     String
+  type        NotificationType
+  title       String               @db.VarChar(300)
+  description String?              @db.Text
+  priority    NotificationPriority @default(low)
+  action_url  String?              @db.Text
+  payload     Json?
+  is_read     Boolean              @default(false)
+  created_at  DateTime             @default(now())
+
+  tenant Tenant @relation(fields: [tenant_id], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id, is_read])
+  @@index([user_id, created_at(sort: Desc)])
+  @@map("notifications")
+}
+
+// ============================================================
+// REFRESH TOKENS
+// ============================================================
+
+model RefreshToken {
+  id         String   @id @default(uuid())
+  user_id    String
+  token      String   @unique @db.VarChar(500)
+  expires_at DateTime
+  revoked    Boolean  @default(false)
+  created_at DateTime @default(now())
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id])
+  @@index([token])
+  @@map("refresh_tokens")
+}
