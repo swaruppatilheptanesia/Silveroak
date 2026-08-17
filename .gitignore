@@ -17,11 +17,13 @@ build/
 !.env.example
 !**/.env.example
 
-# ── Backups / scratch ───────────────────────────────────────
+# ── Backups / scratch (all live under the single root backup/ folder) ──
 backup/
-backup_*/
 **/backup/
+backup_*/
 **/backup_*/
+backup-*/
+**/backup-*/
 
 # ── Backend uploads (user content) — keep the folder ────────
 backend/uploads/*
