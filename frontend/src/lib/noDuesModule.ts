@@ -57,6 +57,7 @@ export function normalizeNoDuesRequest(
     student_name: student?.full_name ?? '',
     roll_number: student?.roll_number ?? student?.enrollment_number ?? '',
     department: student?.department ?? '',
+    branch: student?.branch ?? null,
     course_name: student?.course ?? null,
     batch_year: student?.batch ?? null,
     email: student?.email ?? null,

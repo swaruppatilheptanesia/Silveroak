@@ -105,6 +105,7 @@ type AnnouncementStudentRecord = {
   id: string;
   institute: string | null;
   course: string | null;
+  branch?: string | null;
   department: string;
   batch: string;
   academic_profile: {
@@ -129,6 +130,7 @@ async function getStudentContext(userId: string, scope?: Express.ScopeFilters) {
       id: true,
       institute: true,
       course: true,
+      branch: true,
       department: true,
       batch: true,
       academic_profile: {
@@ -195,6 +197,7 @@ interface AnnouncementScopeTargets {
 interface AnnouncementScopeStudent {
   institute: string | null;
   course: string | null;
+  branch?: string | null;
   department: string | null;
   semester: number | null;
 }
@@ -211,15 +214,15 @@ function studentMatchesAnnouncementScope(
     return false;
   }
 
-  // Students carry no branch-level attribute — `department` is course-derived — so a branch target
-  // is also satisfied by the parent course. Mirrors matchesStudentTargetingForMaster's fallback;
-  // without it, branch-targeted announcements reach nobody.
-  if (
-    targets.target_branches.length > 0
-    && !matchesAllowedValue(student.department, targets.target_branches)
-    && !matchesAllowedValue(student.course, targets.target_branches)
-  ) {
-    return false;
+  // Branch is null-gated: enforced against the student's real ERP branch when present, otherwise the
+  // parent course satisfies it (un-backfilled students / transitional), so branch-targeted
+  // announcements still reach the right cohort. Mirrors branchDimensionMatches in student-targeting.
+  if (targets.target_branches.length > 0) {
+    const hasStudentBranch = typeof student.branch === 'string' && student.branch.trim() !== '';
+    const branchOk = hasStudentBranch
+      ? matchesAllowedValue(student.branch, targets.target_branches)
+      : matchesAllowedValue(student.course, targets.target_branches);
+    if (!branchOk) return false;
   }
 
   if (
@@ -254,6 +257,7 @@ function studentMatchesAnnouncement(
     !studentMatchesAnnouncementScope(announcement, {
       institute: student.institute,
       course: student.course,
+      branch: student.branch,
       department: student.department,
       semester: student.academic_profile?.semester ?? null,
     })
@@ -366,6 +370,7 @@ async function countRecipientsForAnnouncement(announcementId: string) {
       id: true,
       institute: true,
       course: true,
+      branch: true,
       department: true,
       batch: true,
       academic_profile: {
@@ -477,12 +482,22 @@ export async function getAnnouncements(
     branch,
     date_from,
     date_to,
+    search,
   } = filters;
+
+  // Free-text search over title/content, applied server-side in every branch.
+  const searchOr: Prisma.AnnouncementWhereInput['OR'] = search
+    ? [
+        { title: { contains: search, mode: 'insensitive' } },
+        { content: { contains: search, mode: 'insensitive' } },
+      ]
+    : undefined;
 
   if (isAdmin(user)) {
     const where: Prisma.AnnouncementWhereInput = { tenant_id: tenantId };
     if (status) where.status = status;
     if (priority) where.priority = priority;
+    if (searchOr) where.OR = searchOr;
     // FILTER COUNTER EXPORT — match the announcement's targeting arrays; empty-target rows are "all students".
     if (institute) where.target_institutes = { has: institute };
     if (course) where.target_courses = { has: course };
@@ -514,6 +529,8 @@ export async function getAnnouncements(
   if (priority) {
     where.priority = priority;
   }
+
+  if (searchOr) where.OR = searchOr;
 
   if (user.role === 'faculty_coordinator') {
     const [announcements, total] = await Promise.all([
@@ -634,6 +651,7 @@ export async function getAudienceSemesterOptions(tenantId: string, filters: Quer
     select: {
       institute: true,
       course: true,
+      branch: true,
       department: true,
       academic_profile: { select: { semester: true } },
     },
@@ -653,6 +671,7 @@ export async function getAudienceSemesterOptions(tenantId: string, filters: Quer
     const inScope = studentMatchesAnnouncementScope(targets, {
       institute: student.institute,
       course: student.course,
+      branch: student.branch,
       department: student.department,
       semester: student.academic_profile?.semester ?? null,
     });

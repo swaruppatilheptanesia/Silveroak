@@ -151,6 +151,12 @@ const noDuesApi = {
     return throwIfError(res);
   },
 
+  // Distinct Student.batch values ("passing years") for the No Dues Management filter.
+  getPassingYears: async (): Promise<string[]> => {
+    const res = await apiClient.get<{ passing_years: string[] }>('/no-dues/passing-years');
+    return throwIfError(res).passing_years ?? [];
+  },
+
   reviewRequest: async (id: string, data: ReviewNoDuesInput): Promise<ApiNoDuesDetail> => {
     const res = await apiClient.put<ApiNoDuesDetail>(`/no-dues/${id}/review`, data);
     return throwIfError(res);

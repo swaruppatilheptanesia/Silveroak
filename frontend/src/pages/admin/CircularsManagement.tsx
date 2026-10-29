@@ -1,8 +1,11 @@
-import { useDeferredValue, useMemo, useState } from 'react';
-import { Eye, FileText, Search } from 'lucide-react';
+import { useDeferredValue, useEffect, useMemo, useState } from 'react';
+import { Eye, FileText, Search, Trash2 } from 'lucide-react';
+import { toast } from 'sonner';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import GenerateCircularDialog from '@/components/circulars/GenerateCircularDialog';
+import { ConfirmActionDialog } from '@/components/shared/ConfirmActionDialog';
 import { EmptyState } from '@/components/shared/EmptyState';
+import { ListPager } from '@/components/shared/ListPager';
 import { PageLoader } from '@/components/shared/PageLoader';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -26,8 +29,10 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { SortableTableHead } from '@/components/shared/SortableTableHead';
-import { useClientSort } from '@/hooks/use-client-sort';
-import { useGeneratedCirculars } from '@/hooks/use-circular-api';
+import { useServerSort } from '@/hooks/use-server-sort';
+import { useDeleteGeneratedCircular, useGeneratedCircularsPaged } from '@/hooks/use-circular-api';
+import { useAuth } from '@/contexts/AuthContext';
+import { hasPermission } from '@/lib/permissionModule';
 import {
   formatCircularFieldValue,
   getCircularErrorMessage,
@@ -41,40 +46,49 @@ export default function CircularsManagement() {
   const [circularSearch, setCircularSearch] = useState('');
   const [viewCircularId, setViewCircularId] = useState('');
   const [generateOpen, setGenerateOpen] = useState(false);
+  const [deleteCircularId, setDeleteCircularId] = useState('');
   const deferredCircularSearch = useDeferredValue(circularSearch);
+  const [page, setPage] = useState(1);
 
-  const generatedCircularsQuery = useGeneratedCirculars();
+  const { user } = useAuth();
+  const canDelete = hasPermission(user?.permissions, { module: 'circulars', action: 'delete' }, user?.role);
+  const deleteCircular = useDeleteGeneratedCircular();
 
-  const generatedCircularViews = useMemo(
-    () => (generatedCircularsQuery.data ?? []).map(toGeneratedCircularView),
-    [generatedCircularsQuery.data],
-  );
+  const { sort_by, sort_order, onSort } = useServerSort<
+    'company_name' | 'role_name' | 'type' | 'generated_at'
+  >('generated_at', 'desc', () => setPage(1));
 
-  const filteredGeneratedCirculars = useMemo(() => {
-    const normalizedSearch = deferredCircularSearch.trim().toLowerCase();
+  useEffect(() => { setPage(1); }, [deferredCircularSearch]);
 
-    if (!normalizedSearch) {
-      return generatedCircularViews;
-    }
-
-    return generatedCircularViews.filter((circular) => {
-      return circular.title.toLowerCase().includes(normalizedSearch)
-        || circular.companyName.toLowerCase().includes(normalizedSearch)
-        || circular.roleName.toLowerCase().includes(normalizedSearch)
-        || circular.sourceLabel.toLowerCase().includes(normalizedSearch);
-    });
-  }, [deferredCircularSearch, generatedCircularViews]);
-
-  const { sorted: sortedCirculars, sort_by, sort_order, onSort } = useClientSort(filteredGeneratedCirculars, {
-    id: (c) => c.id,
-    title: (c) => c.title,
-    company: (c) => c.companyName,
-    role: (c) => c.roleName,
-    type: (c) => getCircularTypeLabel(c.circularType),
-    generated_on: (c) => new Date(c.generatedAt),
+  const generatedCircularsQuery = useGeneratedCircularsPaged({
+    page,
+    limit: 20,
+    search: deferredCircularSearch.trim() || undefined,
+    sort_by,
+    sort_order,
   });
 
+  const generatedCircularViews = useMemo(
+    () => (generatedCircularsQuery.data?.data ?? []).map(toGeneratedCircularView),
+    [generatedCircularsQuery.data],
+  );
+  const pagination = generatedCircularsQuery.data?.pagination;
+
   const selectedCircular = generatedCircularViews.find((circular) => circular.id === viewCircularId) ?? null;
+  const deleteCircularView = generatedCircularViews.find((circular) => circular.id === deleteCircularId) ?? null;
+
+  const handleDeleteCircular = () => {
+    if (!deleteCircularId) return;
+    deleteCircular.mutate(deleteCircularId, {
+      onSuccess: () => {
+        toast.success('Circular deleted');
+        setDeleteCircularId('');
+      },
+      onError: (error) => {
+        toast.error(getCircularErrorMessage(error, 'Unable to delete circular.'));
+      },
+    });
+  };
 
   if (generatedCircularsQuery.isLoading) {
     return (
@@ -139,7 +153,7 @@ export default function CircularsManagement() {
 
         <Card>
           <CardContent className="p-0">
-            {filteredGeneratedCirculars.length === 0 ? (
+            {generatedCircularViews.length === 0 ? (
               <EmptyState
                 className="p-6"
                 compact
@@ -152,17 +166,17 @@ export default function CircularsManagement() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <SortableTableHead label="Circular ID" columnKey="id" sortBy={sort_by} sortOrder={sort_order} onSort={onSort} />
-                      <SortableTableHead label="Title" columnKey="title" sortBy={sort_by} sortOrder={sort_order} onSort={onSort} />
-                      <SortableTableHead label="Company" columnKey="company" sortBy={sort_by} sortOrder={sort_order} onSort={onSort} />
-                      <SortableTableHead label="Role" columnKey="role" sortBy={sort_by} sortOrder={sort_order} onSort={onSort} />
+                      <TableHead>Circular ID</TableHead>
+                      <TableHead>Title</TableHead>
+                      <SortableTableHead label="Company" columnKey="company_name" sortBy={sort_by} sortOrder={sort_order} onSort={onSort} />
+                      <SortableTableHead label="Role" columnKey="role_name" sortBy={sort_by} sortOrder={sort_order} onSort={onSort} />
                       <SortableTableHead label="Type" columnKey="type" sortBy={sort_by} sortOrder={sort_order} onSort={onSort} />
-                      <SortableTableHead label="Generated On" columnKey="generated_on" sortBy={sort_by} sortOrder={sort_order} onSort={onSort} />
+                      <SortableTableHead label="Generated On" columnKey="generated_at" sortBy={sort_by} sortOrder={sort_order} onSort={onSort} />
                       <TableHead className="text-right">Action</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {sortedCirculars.map((circular) => (
+                    {generatedCircularViews.map((circular) => (
                       <TableRow key={circular.id}>
                         <TableCell className="font-mono text-sm">{circular.id.slice(0, 8).toUpperCase()}</TableCell>
                         <TableCell className="font-medium">{circular.title}</TableCell>
@@ -173,10 +187,23 @@ export default function CircularsManagement() {
                         </TableCell>
                         <TableCell className="text-sm">{formatDateTime(circular.generatedAt)}</TableCell>
                         <TableCell className="text-right">
-                          <Button variant="ghost" size="sm" onClick={() => setViewCircularId(circular.id)}>
-                            <Eye className="mr-1 h-4 w-4" />
-                            View
-                          </Button>
+                          <div className="flex items-center justify-end gap-1">
+                            <Button variant="ghost" size="sm" onClick={() => setViewCircularId(circular.id)}>
+                              <Eye className="mr-1 h-4 w-4" />
+                              View
+                            </Button>
+                            {canDelete && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="text-destructive hover:text-destructive"
+                                onClick={() => setDeleteCircularId(circular.id)}
+                              >
+                                <Trash2 className="mr-1 h-4 w-4" />
+                                Delete
+                              </Button>
+                            )}
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -184,6 +211,11 @@ export default function CircularsManagement() {
                 </Table>
               </div>
             )}
+            <ListPager
+              page={pagination?.page ?? 1}
+              totalPages={pagination?.totalPages ?? 1}
+              onPageChange={setPage}
+            />
           </CardContent>
         </Card>
       </div>
@@ -248,6 +280,23 @@ export default function CircularsManagement() {
       <GenerateCircularDialog
         open={generateOpen}
         onOpenChange={setGenerateOpen}
+      />
+
+      <ConfirmActionDialog
+        open={Boolean(deleteCircularId)}
+        onOpenChange={(open) => {
+          if (!open) setDeleteCircularId('');
+        }}
+        title="Delete circular?"
+        description={
+          deleteCircularView
+            ? `This permanently deletes the circular "${deleteCircularView.title}". This action cannot be undone.`
+            : 'This permanently deletes the circular. This action cannot be undone.'
+        }
+        confirmLabel="Delete"
+        confirmVariant="destructive"
+        isPending={deleteCircular.isPending}
+        onConfirm={handleDeleteCircular}
       />
     </DashboardLayout>
   );

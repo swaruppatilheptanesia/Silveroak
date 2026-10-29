@@ -9,11 +9,22 @@ import { SearchableSelect, type SearchableSelectOption } from '@/components/shar
 import { usePolicyBranchOptions, usePolicyCourseOptions, usePolicyInstituteOptions } from '@/hooks/use-policy-api';
 import { useMasterValues } from '@/hooks/use-master-api';
 import { usePostingTypeOptions } from '@/hooks/use-posting-type-options';
+import { filterPostingTypeOptionsByAcademicYear } from '@/lib/postingModule';
 import type { PolicyAudienceOption } from '@/types/policy';
 
 export type DateRangeValue = { from?: Date; to?: Date };
 
-type StringControl = { value: string; onChange: (value: string) => void };
+type StringControl = {
+  value: string;
+  onChange: (value: string) => void;
+  // Optional explicit option list (e.g. real Student.batch values for Passing Year). When omitted,
+  // the year selects fall back to the `academic_year` master.
+  options?: string[];
+  label?: string;
+};
+// Posting Type is rendered right after Academic Year and depends on it: `bind` picks whether each option
+// value is the master id (posting_type_master_id) or the raw value string (posting_type).
+type PostingTypeControl = StringControl & { bind?: 'id' | 'value' };
 
 interface AdminListScopeFiltersProps {
   institute?: StringControl;
@@ -22,7 +33,7 @@ interface AdminListScopeFiltersProps {
   semester?: StringControl;
   academicYear?: StringControl;
   passingYear?: StringControl;
-  postingType?: StringControl;
+  postingType?: PostingTypeControl;
   dateRange?: { value: DateRangeValue; onChange: (range: DateRangeValue) => void };
   className?: string;
 }
@@ -83,12 +94,14 @@ const SEMESTER_OPTIONS = ['1', '2', '3', '4', '5', '6', '7', '8'];
 
 function AcademicYearSelect({ control, label }: { control: StringControl; label: string }) {
   const query = useMasterValues('academic_year');
-  const options = query.data ?? [];
+  // Prefer explicit options provided by the caller (e.g. real Student.batch values), else the master.
+  const options = control.options ?? query.data ?? [];
+  const resolvedLabel = control.label ?? label;
   return (
     <Select value={control.value} onValueChange={control.onChange}>
-      <SelectTrigger className="h-9 w-full text-xs"><SelectValue placeholder={label} /></SelectTrigger>
+      <SelectTrigger className="h-9 w-full text-xs"><SelectValue placeholder={resolvedLabel} /></SelectTrigger>
       <SelectContent>
-        <SelectItem value="all">All {label}</SelectItem>
+        <SelectItem value="all">All {resolvedLabel}</SelectItem>
         {options.map((option) => (
           <SelectItem key={option} value={option}>{option}</SelectItem>
         ))}
@@ -125,6 +138,14 @@ export default function AdminListScopeFilters(props: AdminListScopeFiltersProps)
   const branchOptions = useMemo(() => toOptions(branchQuery.data), [branchQuery.data]);
 
   const { options: postingTypeOptions, isLoading: postingTypesLoading } = usePostingTypeOptions(Boolean(postingType));
+  // Posting Type options depend on the selected Academic Year (records are unaffected).
+  const yearFilteredPostingTypes = useMemo(
+    () => filterPostingTypeOptionsByAcademicYear(postingTypeOptions, academicYear?.value),
+    [postingTypeOptions, academicYear?.value],
+  );
+  const postingTypeBind = postingType?.bind ?? 'id';
+  // Gate Posting Type on a chosen Academic Year (only when this bar owns the year control).
+  const postingTypeGated = Boolean(academicYear) && !academicYear?.value;
 
   return (
     <div className={`grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 ${className ?? ''}`}>
@@ -186,12 +207,16 @@ export default function AdminListScopeFilters(props: AdminListScopeFiltersProps)
       {academicYear ? <AcademicYearSelect control={academicYear} label="Academic Years" /> : null}
       {passingYear ? <AcademicYearSelect control={passingYear} label="Passing Years" /> : null}
       {postingType ? (
-        <Select value={postingType.value} onValueChange={postingType.onChange} disabled={postingTypesLoading}>
-          <SelectTrigger className="h-9 w-full text-xs"><SelectValue placeholder="Posting Type" /></SelectTrigger>
+        <Select value={postingType.value} onValueChange={postingType.onChange} disabled={postingTypesLoading || postingTypeGated}>
+          <SelectTrigger className="h-9 w-full text-xs">
+            <SelectValue placeholder={postingTypeGated ? 'Select year first' : 'Posting Type'} />
+          </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Posting Types</SelectItem>
-            {postingTypeOptions.map((option) => (
-              <SelectItem key={option.id} value={option.id}>{option.label}</SelectItem>
+            {yearFilteredPostingTypes.map((option) => (
+              <SelectItem key={option.id} value={postingTypeBind === 'value' ? option.value : option.id}>
+                {option.label}
+              </SelectItem>
             ))}
           </SelectContent>
         </Select>

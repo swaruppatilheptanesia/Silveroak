@@ -18,6 +18,7 @@ export const noDuesKeys = {
   myEligibility: () => [...noDuesKeys.all, 'my-eligibility'] as const,
   list: (params: NoDuesQueryParams) => [...noDuesKeys.all, 'list', params] as const,
   detail: (id: string) => [...noDuesKeys.all, 'detail', id] as const,
+  passingYears: () => [...noDuesKeys.all, 'passing-years'] as const,
 };
 
 // ── Student Hooks ──────────────────────────────────────
@@ -81,6 +82,15 @@ export function useNoDuesDetail(id: string) {
     queryKey: noDuesKeys.detail(id),
     queryFn: () => noDuesService.getRequestDetail(id),
     enabled: !!id,
+  });
+}
+
+/** Distinct Student.batch values ("passing years") for the No Dues Management filter dropdown. */
+export function useNoDuesPassingYears() {
+  return useQuery({
+    queryKey: noDuesKeys.passingYears(),
+    queryFn: () => noDuesService.getPassingYears(),
+    staleTime: 5 * 60 * 1000,
   });
 }
 

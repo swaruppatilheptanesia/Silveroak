@@ -2,7 +2,7 @@
  * React Query hooks for the NOC API module.
  * Covers student NOC requests, faculty/TPO approval, rejection, issuance.
  */
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { nocService } from '@/services/nocService';
 import type {
   NocQueryParams,
@@ -19,6 +19,7 @@ export const nocKeys = {
   list: (params: NocQueryParams) => [...nocKeys.all, 'list', params] as const,
   detail: (id: string) => [...nocKeys.all, 'detail', id] as const,
   fieldSuggestions: () => [...nocKeys.all, 'field-suggestions'] as const,
+  facultySummary: () => [...nocKeys.all, 'faculty-summary'] as const,
 };
 
 // ── Student Hooks ──────────────────────────────────────
@@ -53,6 +54,12 @@ export function useUploadNocSupportingDocument() {
   });
 }
 
+export function useUploadNocTerminationLetter() {
+  return useMutation({
+    mutationFn: (file: File) => nocService.uploadTerminationLetter(file),
+  });
+}
+
 export function useNocFieldSuggestions(enabled = true) {
   return useQuery({
     queryKey: nocKeys.fieldSuggestions(),
@@ -69,6 +76,16 @@ export function useNocs(params: NocQueryParams = {}) {
     queryKey: nocKeys.list(params),
     queryFn: () => nocService.getNocs(params),
     staleTime: 2 * 60 * 1000,
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function useFacultyNocSummary(enabled = true) {
+  return useQuery({
+    queryKey: nocKeys.facultySummary(),
+    queryFn: () => nocService.getFacultyNocSummary(),
+    staleTime: 2 * 60 * 1000,
+    enabled,
   });
 }
 

@@ -52,13 +52,13 @@ import { SortableTableHead } from '@/components/shared/SortableTableHead';
 import { useServerSort } from '@/hooks/use-server-sort';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useInternships, useUpdateInternship } from '@/hooks/use-internship-api';
-import { useMasterValues } from '@/hooks/use-master-api';
+import AdminListScopeFilters from '@/components/admin/AdminListScopeFilters';
 import { usePostingTypeOptions } from '@/hooks/use-posting-type-options';
 import { formatPostingTypeLabel } from '@/lib/postingModule';
 import {
   getInternshipBatch,
+  getInternshipBranch,
   getInternshipDaysRemaining,
-  getInternshipDepartment,
   getInternshipEnrollmentNumber,
   getInternshipStudentName,
 } from '@/lib/internshipModule';
@@ -89,7 +89,10 @@ function StatCard({ title, value, hint }: { title: string; value: string; hint: 
 export default function InternshipsManagement() {
   const [activeTab, setActiveTab] = useState<'all' | InternshipStatus | 'issues'>('all');
   const [searchTerm, setSearchTerm] = useState('');
-  const [departmentFilter, setDepartmentFilter] = useState('all');
+  const [instituteFilter, setInstituteFilter] = useState('');
+  const [courseFilter, setCourseFilter] = useState('');
+  const [branchFilter, setBranchFilter] = useState('');
+  const [semesterFilter, setSemesterFilter] = useState('all');
   const [postingTypeFilter, setPostingTypeFilter] = useState<string>('all');
   const { options: postingTypeOptions, isLoading: postingTypesLoading, isEmpty: postingTypesEmpty } = usePostingTypeOptions();
   const [typeFilter, setTypeFilter] = useState<'all' | InternshipType>('all');
@@ -103,11 +106,6 @@ export default function InternshipsManagement() {
   const [bulkAction, setBulkAction] = useState<'completed' | 'discontinued' | null>(null);
   const deferredSearch = useDeferredValue(searchTerm);
   const updateInternship = useUpdateInternship();
-  const branchMasterValues = useMasterValues('branch');
-  const departmentOptions = [
-    { value: 'all', label: 'All departments' },
-    ...(branchMasterValues.data ?? []).map((department) => ({ value: department, label: department })),
-  ];
 
   const internshipsQuery = useInternships({
     page,
@@ -116,7 +114,10 @@ export default function InternshipsManagement() {
     sort_order,
     search: deferredSearch || undefined,
     status: activeTab !== 'all' && activeTab !== 'issues' ? activeTab : undefined,
-    department: departmentFilter === 'all' ? undefined : departmentFilter,
+    institute: instituteFilter || undefined,
+    course: courseFilter || undefined,
+    branch: branchFilter || undefined,
+    semester: semesterFilter === 'all' ? undefined : semesterFilter,
     posting_type_master_id: postingTypeFilter === 'all' ? undefined : postingTypeFilter,
     internship_type: typeFilter === 'all' ? undefined : typeFilter,
     has_open_issues: activeTab === 'issues' ? true : undefined,
@@ -249,25 +250,6 @@ export default function InternshipsManagement() {
             </div>
 
             <Select
-              value={departmentFilter}
-              onValueChange={(value) => {
-                setDepartmentFilter(value);
-                setPage(1);
-              }}
-            >
-              <SelectTrigger className="w-full xl:w-52">
-                <SelectValue placeholder="Department" />
-              </SelectTrigger>
-              <SelectContent>
-                {departmentOptions.map((department) => (
-                  <SelectItem key={department.value} value={department.value}>
-                    {department.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            <Select
               value={postingTypeFilter}
               onValueChange={(value) => {
                 setPostingTypeFilter(value);
@@ -313,6 +295,14 @@ export default function InternshipsManagement() {
                 ))}
               </SelectContent>
             </Select>
+          </CardContent>
+          <CardContent className="pt-0">
+            <AdminListScopeFilters
+              institute={{ value: instituteFilter, onChange: (value) => { setInstituteFilter(value); setPage(1); } }}
+              course={{ value: courseFilter, onChange: (value) => { setCourseFilter(value); setPage(1); } }}
+              branch={{ value: branchFilter, onChange: (value) => { setBranchFilter(value); setPage(1); } }}
+              semester={{ value: semesterFilter, onChange: (value) => { setSemesterFilter(value); setPage(1); } }}
+            />
           </CardContent>
         </Card>
 
@@ -389,7 +379,7 @@ export default function InternshipsManagement() {
                             <div>
                               <p className="font-medium text-foreground">{getInternshipStudentName(internship)}</p>
                               <p className="text-xs text-muted-foreground">
-                                {getInternshipEnrollmentNumber(internship)} • {getInternshipDepartment(internship)}
+                                {getInternshipEnrollmentNumber(internship)} • {getInternshipBranch(internship)}
                               </p>
                               <p className="text-xs text-muted-foreground">Batch {getInternshipBatch(internship)}</p>
                             </div>

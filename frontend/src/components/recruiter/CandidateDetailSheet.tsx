@@ -186,7 +186,7 @@ export function CandidateDetailSheet({
                 </Badge>
               </div>
               <SheetDescription className="mt-1">
-                {application.enrollment_number} • {application.department}
+                {application.enrollment_number} • {application.branch ?? application.department}
               </SheetDescription>
               <div className="flex items-center gap-4 mt-2 text-sm text-muted-foreground">
                 <span className="flex items-center gap-1">
@@ -275,8 +275,8 @@ export function CandidateDetailSheet({
                 <CardContent>
                   <div className="grid grid-cols-2 gap-4 text-sm">
                     <div>
-                      <p className="text-muted-foreground">Department</p>
-                      <p className="font-medium">{application.department}</p>
+                      <p className="text-muted-foreground">Branch</p>
+                      <p className="font-medium">{application.branch ?? application.department}</p>
                     </div>
                     <div>
                       <p className="text-muted-foreground">Batch</p>

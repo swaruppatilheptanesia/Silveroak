@@ -213,6 +213,7 @@ async function main() {
   }
   console.log(`  Created ${permCount} role-permission entries (${PERMISSION_ROLES.length} roles x ${PERMISSION_MODULES.length} modules)`);
 
+
   // 7. Create a sample policy (idempotent)
   const existingPolicy = await prisma.policy.findFirst({
     where: { tenant_id: tenant.id, title: 'Placement Policy 2025-26' },

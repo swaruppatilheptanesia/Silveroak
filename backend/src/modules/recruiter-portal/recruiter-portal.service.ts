@@ -185,6 +185,7 @@ export async function getRecruiterApplications(userId: string, postingId: string
           full_name: true,
           enrollment_number: true,
           department: true,
+          branch: true,
           batch: true,
           // PII fields excluded: email, mobile, date_of_birth, residential_address
         },

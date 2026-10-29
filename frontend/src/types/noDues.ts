@@ -20,6 +20,7 @@ export interface NoDuesRequest {
   student_name: string;
   roll_number: string;
   department: string;
+  branch?: string | null;
   course_name?: string | null;
   batch_year?: string | null;
   email?: string | null;
@@ -82,6 +83,7 @@ export interface ApiNoDuesStudentSummary {
   enrollment_number: string;
   roll_number: string | null;
   department: string;
+  branch?: string | null;
   batch: string;
   course: string | null;
   email: string;

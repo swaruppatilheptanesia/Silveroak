@@ -242,7 +242,11 @@ export async function upsertNocTemplate(
   return template;
 }
 
-export async function getTemplateForProgram(tenantId: string, program: string, branch?: string | null) {
+export async function getTemplateForProgram(
+  tenantId: string,
+  program: string,
+  branch?: string | null | Array<string | null | undefined>,
+) {
   await ensureTenantNocTemplatesSeeded(tenantId);
 
   const postingType = await prisma.masterOption.findFirst({
@@ -269,8 +273,13 @@ export async function getTemplateForProgram(tenantId: string, program: string, b
     include: buildTemplateInclude(),
   });
 
-  const normalizedBranch = branch ? normalizeScopeValue(branch) : '';
-  const template = templates.find((item) => normalizeScopeValue(item.branch_scope) === normalizedBranch)
+  // Match the template's branch_scope against any candidate scope (ERP branch preferred, course-derived
+  // department as a back-compat fallback), then fall back to the 'all'-scope template, then the first.
+  const candidates = Array.isArray(branch) ? branch : [branch];
+  const normalizedCandidates = candidates
+    .map((value) => (value ? normalizeScopeValue(value) : ''))
+    .filter((value) => value.length > 0);
+  const template = templates.find((item) => normalizedCandidates.includes(normalizeScopeValue(item.branch_scope)))
     ?? templates.find((item) => normalizeScopeValue(item.branch_scope) === 'all')
     ?? templates[0]
     ?? null;

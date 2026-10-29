@@ -1,5 +1,33 @@
 import { z } from 'zod';
-import { paginationSchema, sortSchema } from '../../shared/schemas/common';
+import { paginationSchema, searchSchema, sortSchema } from '../../shared/schemas/common';
+
+const NOC_STATUS_VALUES = [
+  'pending_faculty',
+  'pending_tpo',
+  'pending_company_verification',
+  'approved',
+  'issued',
+  'rejected',
+] as const;
+
+/** Comma-separated NOC statuses — e.g. `?statuses=pending_tpo,approved` (Pending vs Reviewed tabs). */
+const nocStatusesCsv = z
+  .union([z.string(), z.array(z.string())])
+  .optional()
+  .transform((value, ctx) => {
+    if (value === undefined) return undefined;
+    const parts = (Array.isArray(value) ? value : value.split(','))
+      .map((part) => part.trim())
+      .filter((part) => part.length > 0);
+    if (parts.length === 0) return undefined;
+    for (const part of parts) {
+      if (!NOC_STATUS_VALUES.includes(part as (typeof NOC_STATUS_VALUES)[number])) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `Invalid status: ${part}` });
+        return z.NEVER;
+      }
+    }
+    return parts as (typeof NOC_STATUS_VALUES)[number][];
+  });
 
 // Format guards for the two optional contact/address fields — the form validates these too, but the
 // endpoint must not trust it. Both keep '' acceptable so a non-form caller can send an empty value
@@ -32,7 +60,7 @@ const indianPincodeSchema = z
 
 export const createNocSchema = z.object({
   noc_type: z.enum(['internship', 'training', 'project']),
-  internship_type: z.enum(['internship', 'placement']).optional().nullable(),
+  internship_type: z.enum(['internship', 'placement', 'internship_placement']).optional().nullable(),
   program: z.string().trim().min(1).max(150),
   placement_source: z.enum(['university_drive', 'self_sourced']),
   drive_id: z.string().uuid().optional().nullable(),
@@ -59,7 +87,37 @@ export const createNocSchema = z.object({
   end_date: z.coerce.date().optional().nullable(),
   duration_weeks: z.number().int().min(1).optional().nullable(),
   offer_letter_url: z.string().min(1, 'Offer letter is required').max(2000),
+  // Re-issue fields — required only when is_reissue is true (see superRefine below).
+  is_reissue: z.boolean().default(false),
+  previous_noc_id: z.string().uuid().optional().nullable(),
+  reason_for_company_change: z.string().max(2000).optional().nullable(),
+  termination_letter_url: z.string().max(2000).optional().nullable(),
+  termination_letter_name: z.string().max(255).optional().nullable(),
 }).superRefine((data, ctx) => {
+  // A re-issue must name the previous NOC, a reason for the company change, and a termination/relieving letter.
+  if (data.is_reissue) {
+    if (!data.previous_noc_id) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['previous_noc_id'],
+        message: 'Select the previous NOC you are re-issuing.',
+      });
+    }
+    if (!data.reason_for_company_change || !data.reason_for_company_change.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['reason_for_company_change'],
+        message: 'Reason for company change is required for a re-issued NOC.',
+      });
+    }
+    if (!data.termination_letter_url || !data.termination_letter_url.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['termination_letter_url'],
+        message: 'Termination / relieving letter is required for a re-issued NOC.',
+      });
+    }
+  }
   // Self-sourced NOCs create a new company; the contact person becomes its recruiter, so
   // name + email are required (so a recruiter can always be created and linked on approval).
   if (data.placement_source === 'self_sourced') {
@@ -93,8 +151,10 @@ export const rejectCompletionCertificateSchema = z.object({
   remarks: z.string().trim().min(1, 'A rejection remark is required.').max(2000),
 });
 
-export const queryNocSchema = paginationSchema.merge(sortSchema).extend({
+export const queryNocSchema = paginationSchema.merge(sortSchema).merge(searchSchema).extend({
   status: z.enum(['pending_faculty', 'pending_tpo', 'pending_company_verification', 'approved', 'issued', 'rejected']).optional(),
+  // Multi-status filter (faculty Pending/Reviewed tabs → their own paginated query).
+  statuses: nocStatusesCsv,
   noc_type: z.enum(['internship', 'training', 'project']).optional(),
   completion_status: z.enum(['pending', 'approved', 'rejected']).optional(),
   // FILTER COUNTER EXPORT — student-scope + posting-type (program value) + date range

@@ -33,13 +33,14 @@ import {
 import AdminListScopeFilters, { type DateRangeValue } from '@/components/admin/AdminListScopeFilters';
 import { useAuth } from '@/contexts/AuthContext';
 import { useOffers } from '@/hooks/use-offer-api';
-import { usePostingTypeOptions } from '@/hooks/use-posting-type-options';
 import { offerService } from '@/services/offerService';
 import { getOfferCompensation, sortOffersByLatest } from '@/lib/offerModule';
 import { downloadCsvTable, downloadExcelTable } from '@/lib/spreadsheetExport';
+import { toDateParam } from '@/lib/formatters';
 import {
   JOINING_STATUS_CONFIG,
   OFFER_STATUS_CONFIG,
+  type ApiOfferListItem,
   type OfferStatus,
 } from '@/types/offer';
 
@@ -65,13 +66,12 @@ export default function FacultyOffers() {
   const { sort_by, sort_order, onSort } = useServerSort<
     'student' | 'company' | 'role' | 'status' | 'joining' | 'offer_date'
   >('offer_date', 'desc', () => setPage(1));
-  const { options: postingTypeOptions, isLoading: postingTypesLoading } = usePostingTypeOptions();
 
   const scopeParams = {
     posting_type_master_id: postingTypeFilter === 'all' ? undefined : postingTypeFilter,
     academic_year: academicYearFilter === 'all' ? undefined : academicYearFilter,
-    date_from: dateRange.from ? dateRange.from.toISOString() : undefined,
-    date_to: dateRange.to ? dateRange.to.toISOString() : undefined,
+    date_from: toDateParam(dateRange.from),
+    date_to: toDateParam(dateRange.to),
   };
 
   const offersQuery = useOffers({
@@ -85,12 +85,12 @@ export default function FacultyOffers() {
   });
   const totalOffersQuery = useOffers({ page: 1, limit: 1 });
   // Counters stay department-wide (unfiltered) so they don't shift with the table filters.
-  const statsQuery = useOffers({
-    page: 1,
-    limit: Math.max(totalOffersQuery.data?.pagination.total ?? 0, 1),
-    sort_by: 'offer_date',
-    sort_order: 'desc',
-  });
+  // Per-status count queries (limit:1, read pagination.total) — avoids fetching every offer, which
+  // would exceed the backend limit cap (.max(100)) and 400 for departments with >100 offers.
+  const acceptedQuery = useOffers({ page: 1, limit: 1, status: 'accepted' });
+  const pendingQuery = useOffers({ page: 1, limit: 1, status: 'pending_student_action' });
+  const rejectedAdminQuery = useOffers({ page: 1, limit: 1, status: 'rejected_by_admin' });
+  const rejectedStudentQuery = useOffers({ page: 1, limit: 1, status: 'rejected_by_student' });
 
   function openDetail(offerId: string) {
     setSelectedOfferId(offerId);
@@ -98,32 +98,38 @@ export default function FacultyOffers() {
   }
 
   const departmentOffers = sortOffersByLatest(offersQuery.data?.data ?? []);
-  const statsSource = statsQuery.data?.data ?? [];
   const deptStats = {
     total: totalOffersQuery.data?.pagination.total ?? 0,
-    accepted: statsSource.filter((offer) => offer.status === 'accepted').length,
-    pending: statsSource.filter((offer) => offer.status === 'pending_student_action').length,
-    rejected: statsSource.filter((offer) => offer.status === 'rejected_by_admin' || offer.status === 'rejected_by_student').length,
+    accepted: acceptedQuery.data?.pagination.total ?? 0,
+    pending: pendingQuery.data?.pagination.total ?? 0,
+    rejected: (rejectedAdminQuery.data?.pagination.total ?? 0) + (rejectedStudentQuery.data?.pagination.total ?? 0),
   };
 
   async function handleExport(exportFormat: 'csv' | 'excel') {
     setIsExporting(true);
     try {
-      const result = await offerService.getOffers({
-        ...scopeParams,
-        status: statusFilter === 'all' ? undefined : statusFilter,
-        search: deferredSearch || undefined,
-        page: 1,
-        limit: 1000,
-        sort_by: 'offer_date',
-        sort_order: 'desc',
-      });
-      const rows = (result.data ?? []).map((offer) => [
+      // The backend caps `limit` at 100 (paginationSchema), so page and loop until a short/empty page.
+      const all: ApiOfferListItem[] = [];
+      for (let p = 1; p <= 500; p++) {
+        const result = await offerService.getOffers({
+          ...scopeParams,
+          status: statusFilter === 'all' ? undefined : statusFilter,
+          search: deferredSearch || undefined,
+          page: p,
+          limit: 100,
+          sort_by: 'offer_date',
+          sort_order: 'desc',
+        });
+        const batch = result.data ?? [];
+        all.push(...batch);
+        if (batch.length < 100) break;
+      }
+      const rows = all.map((offer) => [
         offer.student.full_name,
         offer.student.enrollment_number,
         offer.student.institute ?? '',
         offer.student.course ?? '',
-        offer.student.department,
+        offer.student.branch ?? offer.student.department,
         offer.student.current_semester ?? '',
         offer.posting.type,
         offer.company.name,
@@ -156,18 +162,16 @@ export default function FacultyOffers() {
       subtitle={`${user?.department || 'Faculty scope'} - read-only department offers`}
     >
       <div className="space-y-6">
-        {(offersQuery.error || statsQuery.error || totalOffersQuery.error) && (
+        {(offersQuery.error || totalOffersQuery.error) && (
           <Card className="border-destructive/30">
             <CardContent className="flex items-start gap-3 p-4 text-sm text-destructive">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
               <p>
                 {offersQuery.error instanceof Error
                   ? offersQuery.error.message
-                  : statsQuery.error instanceof Error
-                    ? statsQuery.error.message
-                    : totalOffersQuery.error instanceof Error
-                      ? totalOffersQuery.error.message
-                      : 'Unable to load faculty offers right now.'}
+                  : totalOffersQuery.error instanceof Error
+                    ? totalOffersQuery.error.message
+                    : 'Unable to load faculty offers right now.'}
               </p>
             </CardContent>
           </Card>
@@ -191,7 +195,7 @@ export default function FacultyOffers() {
               <CheckCircle2 className="h-5 w-5 text-green-600" />
               <div>
                 <p className="text-2xl font-bold">
-                  {statsQuery.isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : deptStats.accepted}
+                  {acceptedQuery.isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : deptStats.accepted}
                 </p>
                 <p className="text-sm text-muted-foreground">Accepted</p>
               </div>
@@ -202,7 +206,7 @@ export default function FacultyOffers() {
               <Clock className="h-5 w-5 text-amber-600" />
               <div>
                 <p className="text-2xl font-bold">
-                  {statsQuery.isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : deptStats.pending}
+                  {pendingQuery.isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : deptStats.pending}
                 </p>
                 <p className="text-sm text-muted-foreground">Pending</p>
               </div>
@@ -213,7 +217,7 @@ export default function FacultyOffers() {
               <XCircle className="h-5 w-5 text-red-600" />
               <div>
                 <p className="text-2xl font-bold">
-                  {statsQuery.isLoading ? <Loader2 className="h-5 w-5 animate-spin" /> : deptStats.rejected}
+                  {(rejectedAdminQuery.isLoading || rejectedStudentQuery.isLoading) ? <Loader2 className="h-5 w-5 animate-spin" /> : deptStats.rejected}
                 </p>
                 <p className="text-sm text-muted-foreground">Rejected</p>
               </div>
@@ -251,16 +255,6 @@ export default function FacultyOffers() {
                 ))}
               </SelectContent>
             </Select>
-            {/* Offers filter by the posting-type master UUID — bind option.id. */}
-            <Select value={postingTypeFilter} onValueChange={(value) => { setPostingTypeFilter(value); setPage(1); }} disabled={postingTypesLoading}>
-              <SelectTrigger className="w-full sm:w-52"><SelectValue placeholder="Posting Type" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Posting Types</SelectItem>
-                {postingTypeOptions.map((option) => (
-                  <SelectItem key={option.id} value={option.id}>{option.label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
             <Button variant="outline" disabled={isExporting} onClick={() => handleExport('csv')}>
               {isExporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
               Export CSV
@@ -272,6 +266,7 @@ export default function FacultyOffers() {
           </div>
           <AdminListScopeFilters
             academicYear={{ value: academicYearFilter, onChange: (value) => { setAcademicYearFilter(value); setPage(1); } }}
+            postingType={{ value: postingTypeFilter, onChange: (value) => { setPostingTypeFilter(value); setPage(1); }, bind: 'id' }}
             dateRange={{ value: dateRange, onChange: (range) => { setDateRange(range); setPage(1); } }}
           />
         </div>

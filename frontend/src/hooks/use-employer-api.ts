@@ -2,7 +2,7 @@
  * React Query hooks for the Employer API module.
  * Covers companies, recruiters, and engagements.
  */
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { employerService } from '@/services/employerService';
 import type {
   CompanyQueryParams,
@@ -37,6 +37,7 @@ export function useCompanies(params: CompanyQueryParams = {}, enabled = true) {
     queryKey: employerKeys.companyList(params),
     queryFn: () => employerService.getCompanies(params),
     staleTime: 2 * 60 * 1000,
+    placeholderData: keepPreviousData,
     enabled,
   });
 }
@@ -101,6 +102,7 @@ export function useRecruiters(params: RecruiterQueryParams = {}, enabled = true)
     queryFn: () => employerService.getRecruiters(params),
     enabled,
     staleTime: 60 * 1000,
+    placeholderData: keepPreviousData,
   });
 }
 

@@ -31,7 +31,7 @@ const DUE_WINDOWS = [
 ];
 
 type QueryParams = {
-  department?: string;
+  branch?: string;
   company_id?: string;
   batch?: string;
   search?: string;
@@ -41,16 +41,16 @@ type QueryParams = {
 export default function CertificatePendingReport() {
   const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState('');
-  const [departmentFilter, setDepartmentFilter] = useState('all');
+  const [branchFilter, setBranchFilter] = useState('all');
   const [companyFilter, setCompanyFilter] = useState('all');
   const [dueWindow, setDueWindow] = useState('all');
 
   const queryParams = useMemo<QueryParams>(() => ({
-    department: departmentFilter === 'all' ? undefined : departmentFilter,
+    branch: branchFilter === 'all' ? undefined : branchFilter,
     company_id: companyFilter === 'all' ? undefined : companyFilter,
     search: searchQuery || undefined,
     due_window: dueWindow,
-  }), [companyFilter, departmentFilter, dueWindow, searchQuery]);
+  }), [companyFilter, branchFilter, dueWindow, searchQuery]);
 
   const { data, isLoading } = useCertificatePendingReport(queryParams);
 
@@ -59,7 +59,7 @@ export default function CertificatePendingReport() {
       id: internship.internship_id,
       student_name: internship.student_name,
       enrollment_number: internship.enrollment_number,
-      department: internship.department,
+      branch: internship.branch,
       batch: internship.batch,
       company_name: internship.company_name,
       role: internship.role,
@@ -69,14 +69,15 @@ export default function CertificatePendingReport() {
   }, [data]);
 
   const companies = useMemo(() => Array.from(new Set(pendingInternships.map((internship) => internship.company_name))).sort(), [pendingInternships]);
-  const departments = useMemo(() => Array.from(new Set(pendingInternships.map((internship) => internship.department))).sort(), [pendingInternships]);
+
+  const branches = useMemo(() => Array.from(new Set(pendingInternships.map((r: any) => r.branch).filter(Boolean))).sort() as string[], [pendingInternships]);
 
   const stats = data?.stats ?? { total: 0, overdue: 0, urgent: 0, upcoming: 0 };
 
   const handleExportCsv = () => {
-    const header = 'Student,Enrollment,Department,Batch,Company,Role,End Date,Days Remaining\n';
+    const header = 'Student,Enrollment,Branch,Batch,Company,Role,End Date,Days Remaining\n';
     const rows = pendingInternships.map((internship) =>
-      `"${internship.student_name}",${internship.enrollment_number},${internship.department},${internship.batch},${internship.company_name},"${internship.role}",${internship.end_date ? new Date(internship.end_date).toLocaleDateString('en-IN') : '—'},${internship.daysRemaining}`
+      `"${internship.student_name}",${internship.enrollment_number},${internship.branch},${internship.batch},${internship.company_name},"${internship.role}",${internship.end_date ? new Date(internship.end_date).toLocaleDateString('en-IN') : '—'},${internship.daysRemaining}`
     ).join('\n');
     const blob = new Blob([header + rows], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
@@ -133,12 +134,12 @@ export default function CertificatePendingReport() {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input placeholder="Search..." value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} className="pl-9" />
             </div>
-            <Select value={departmentFilter} onValueChange={setDepartmentFilter}>
-              <SelectTrigger><SelectValue placeholder="Department" /></SelectTrigger>
+            <Select value={branchFilter} onValueChange={setBranchFilter}>
+              <SelectTrigger><SelectValue placeholder="Branch" /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Departments</SelectItem>
-                {departments.map((department) => (
-                  <SelectItem key={department} value={department}>{department}</SelectItem>
+                <SelectItem value="all">All Branches</SelectItem>
+                {branches.map((branch) => (
+                  <SelectItem key={branch} value={branch}>{branch}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -166,7 +167,7 @@ export default function CertificatePendingReport() {
               <TableHeader>
                 <TableRow>
                   <TableHead className="min-w-[160px]">Student</TableHead>
-                  <TableHead>Department</TableHead>
+                  <TableHead>Branch</TableHead>
                   <TableHead>Company</TableHead>
                   <TableHead>Role</TableHead>
                   <TableHead>End Date</TableHead>
@@ -193,7 +194,7 @@ export default function CertificatePendingReport() {
                             <p className="text-xs text-muted-foreground">{internship.enrollment_number}</p>
                           </div>
                         </TableCell>
-                        <TableCell className="text-sm">{internship.department}</TableCell>
+                        <TableCell className="text-sm">{internship.branch}</TableCell>
                         <TableCell className="text-sm">{internship.company_name}</TableCell>
                         <TableCell className="text-sm">{internship.role}</TableCell>
                         <TableCell className="text-sm whitespace-nowrap">

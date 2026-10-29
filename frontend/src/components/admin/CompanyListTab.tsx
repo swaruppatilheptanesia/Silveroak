@@ -62,7 +62,7 @@ import {
   getCompanyClassificationLabel,
   getCompanyCreatedLabel,
 } from '@/lib/employerModule';
-import { formatDate } from '@/lib/formatters';
+import { formatDate, toDateParam } from '@/lib/formatters';
 import { downloadCsvTable, downloadExcelTable } from '@/lib/spreadsheetExport';
 import AdminListScopeFilters, { type DateRangeValue } from '@/components/admin/AdminListScopeFilters';
 import type { ApiCompany, ApiRecruiterListItem } from '@/types/employer';
@@ -170,8 +170,8 @@ export default function CompanyListTab() {
       ? undefined
       : (classificationFilter as ApiCompany['classification']),
     industry: industryFilter === 'all' ? undefined : industryFilter,
-    date_from: dateRange.from ? dateRange.from.toISOString() : undefined,
-    date_to: dateRange.to ? dateRange.to.toISOString() : undefined,
+    date_from: toDateParam(dateRange.from),
+    date_to: toDateParam(dateRange.to),
     sort_by,
     sort_order,
   });
@@ -227,8 +227,8 @@ export default function CompanyListTab() {
           status: statusFilter === 'all' ? undefined : (statusFilter as ApiCompany['status']),
           classification: classificationFilter === 'all' ? undefined : (classificationFilter as ApiCompany['classification']),
           industry: industryFilter === 'all' ? undefined : industryFilter,
-          date_from: dateRange.from ? dateRange.from.toISOString() : undefined,
-          date_to: dateRange.to ? dateRange.to.toISOString() : undefined,
+          date_from: toDateParam(dateRange.from),
+          date_to: toDateParam(dateRange.to),
           sort_by: 'name',
           sort_order: 'asc',
         })),

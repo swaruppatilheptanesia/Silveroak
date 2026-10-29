@@ -11,6 +11,11 @@ export async function getMyNoDuesEligibility(req: Request, res: Response, next: 
   catch (err) { next(err); }
 }
 
+export async function getPassingYears(req: Request, res: Response, next: NextFunction) {
+  try { res.json({ passing_years: await service.getNoDuesPassingYears(req.user!.tenant_id) }); }
+  catch (err) { next(err); }
+}
+
 export async function getNoDuesRequests(req: Request, res: Response, next: NextFunction) {
   try { res.json(await service.getNoDuesRequests(req.user!.tenant_id, req.validated!.query as any)); }
   catch (err) { next(err); }

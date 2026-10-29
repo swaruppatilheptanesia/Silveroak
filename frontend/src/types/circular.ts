@@ -123,6 +123,26 @@ export interface PaginatedTemplates {
   };
 }
 
+export interface PaginatedGeneratedCirculars {
+  data: ApiGeneratedCircular[];
+  pagination: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+    hasNext?: boolean;
+    hasPrev?: boolean;
+  };
+}
+
+export interface GeneratedCircularQueryParams {
+  search?: string;
+  page?: number;
+  limit?: number;
+  sort_by?: 'company_name' | 'role_name' | 'type' | 'generated_at';
+  sort_order?: 'asc' | 'desc';
+}
+
 export interface TemplateQueryParams {
   status?: ApiCircularTemplateStatus;
   type?: ApiCircularTemplateType;

@@ -8,6 +8,7 @@ import {
   FileText,
   HardDrive,
   Loader2,
+  RefreshCw,
   Star,
   Trash2,
   Upload,
@@ -24,6 +25,7 @@ import {
   useDeleteResume,
   useSetDefaultResume,
   useStudentResumes,
+  useUpdateResume,
   useUploadResume,
 } from '@/hooks/use-student-api';
 import { formatDate, formatFileSize } from '@/lib/formatters';
@@ -60,6 +62,16 @@ function ResumeSkeleton() {
   );
 }
 
+const MAX_RESUME_BYTES = 5 * 1024 * 1024;
+
+/** A human error for a picked resume file, or null when it's a PDF within the size limit. */
+function resumeFileProblem(file: File): string | null {
+  const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+  if (!isPdf) return 'Only PDF files are allowed.';
+  if (file.size > MAX_RESUME_BYTES) return 'Resume must be 5 MB or smaller.';
+  return null;
+}
+
 function openAsset(url: string, filename?: string) {
   const anchor = document.createElement('a');
   anchor.href = url;
@@ -78,16 +90,21 @@ function ResumeCard({
   onPreview,
   onDownload,
   onSetDefault,
+  onUpdate,
   onDelete,
   isBusy,
+  isUpdating,
 }: {
   resume: ApiResume;
   onPreview: (resume: ApiResume) => void;
   onDownload: (resume: ApiResume) => void;
   onSetDefault: (resume: ApiResume) => void;
+  onUpdate: (resume: ApiResume) => void;
   onDelete: (resume: ApiResume) => void;
   isBusy: boolean;
+  isUpdating: boolean;
 }) {
+  const usedIn = resume.application_count ?? 0;
   return (
     <Card className={resume.is_default ? 'border-primary' : undefined}>
       <CardContent className="p-6">
@@ -134,17 +151,28 @@ function ResumeCard({
                   Set Default
                 </Button>
               )}
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-destructive hover:text-destructive"
-                disabled={isBusy}
-                onClick={() => onDelete(resume)}
-              >
-                <Trash2 className="mr-2 h-4 w-4" />
-                Delete
+              <Button variant="outline" size="sm" disabled={isBusy} onClick={() => onUpdate(resume)}>
+                {isUpdating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+                {isUpdating ? 'Updating...' : 'Update'}
               </Button>
+              {usedIn === 0 && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-destructive hover:text-destructive"
+                  disabled={isBusy}
+                  onClick={() => onDelete(resume)}
+                >
+                  <Trash2 className="mr-2 h-4 w-4" />
+                  Delete
+                </Button>
+              )}
             </div>
+            {usedIn > 0 && (
+              <p className="mt-2 text-xs text-muted-foreground">
+                Used in {usedIn} application{usedIn === 1 ? '' : 's'} — it can be updated with a new file but not deleted.
+              </p>
+            )}
           </div>
         </div>
       </CardContent>
@@ -154,8 +182,11 @@ function ResumeCard({
 
 export default function Resumes() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const updateInputRef = useRef<HTMLInputElement | null>(null);
   const resumesQuery = useStudentResumes();
   const uploadResume = useUploadResume();
+  const updateResume = useUpdateResume();
+  const [updateTarget, setUpdateTarget] = useState<ApiResume | null>(null);
   const setDefaultResume = useSetDefaultResume();
   const deleteResume = useDeleteResume();
   const [deleteTarget, setDeleteTarget] = useState<ApiResume | null>(null);
@@ -184,6 +215,7 @@ export default function Resumes() {
   const resumes = resumesQuery.data ?? [];
   const isBusy =
     uploadResume.isPending ||
+    updateResume.isPending ||
     setDefaultResume.isPending ||
     deleteResume.isPending;
   const uploadLimitReached = resumes.length >= 5;
@@ -191,17 +223,12 @@ export default function Resumes() {
   async function handleSelectedFile(file: File | undefined) {
     if (!file) return;
 
-    const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
-    if (!isPdf) {
-      toast.error('Only PDF files are allowed.');
+    const problem = resumeFileProblem(file);
+    if (problem) {
+      toast.error(problem);
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
-      return;
-    }
-
-    if (file.size > 5 * 1024 * 1024) {
-      toast.error('Resume must be 5 MB or smaller.');
       return;
     }
 
@@ -214,6 +241,35 @@ export default function Resumes() {
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
+    }
+  }
+
+  function handleUpdate(resume: ApiResume) {
+    setUpdateTarget(resume);
+    updateInputRef.current?.click();
+  }
+
+  /** Replace the target resume's file — same id, so applications using it keep a valid link. */
+  async function handleUpdateFile(file: File | undefined) {
+    const target = updateTarget;
+    if (updateInputRef.current) updateInputRef.current.value = '';
+    if (!file || !target) return;
+    const problem = resumeFileProblem(file);
+    if (problem) {
+      toast.error(problem);
+      return;
+    }
+    try {
+      await updateResume.mutateAsync({ resumeId: target.id, file });
+      toast.success(
+        (target.application_count ?? 0) > 0
+          ? `${target.name} updated — applications using it now see the new file.`
+          : `${target.name} updated.`,
+      );
+    } catch (error) {
+      toast.error(formatApiErrorMessage(error, 'Unable to update the resume.'));
+    } finally {
+      setUpdateTarget(null);
     }
   }
 
@@ -285,6 +341,13 @@ export default function Resumes() {
                   accept="application/pdf,.pdf"
                   onChange={(event) => handleSelectedFile(event.target.files?.[0])}
                 />
+                <input
+                  ref={updateInputRef}
+                  type="file"
+                  className="hidden"
+                  accept="application/pdf,.pdf"
+                  onChange={(event) => handleUpdateFile(event.target.files?.[0])}
+                />
                 <Badge variant={uploadLimitReached ? 'warning' : 'outline'}>
                   {resumes.length}/5 uploaded
                 </Badge>
@@ -298,7 +361,7 @@ export default function Resumes() {
             <AlertCircle className="h-4 w-4" />
             <AlertTitle>Upload limit reached</AlertTitle>
             <AlertDescription>
-              Delete one of your existing resumes before uploading another version.
+              Update one of your existing resumes with the new file, or delete one that isn't used in any application.
             </AlertDescription>
           </Alert>
         )}
@@ -328,8 +391,10 @@ export default function Resumes() {
                     onPreview={handlePreview}
                     onDownload={handleDownload}
                     onSetDefault={handleSetDefault}
+                    onUpdate={handleUpdate}
                     onDelete={handleDelete}
                     isBusy={isBusy}
+                    isUpdating={updateResume.isPending && updateTarget?.id === resume.id}
                   />
                 ))}
               </div>
@@ -344,7 +409,8 @@ export default function Resumes() {
           <CardContent className="space-y-2 text-sm text-muted-foreground">
             <p>Your uploaded resumes appear here as soon as the upload finishes.</p>
             <p>You can mark one resume as your default version for quicker selection later.</p>
-            <p>If you delete your default resume, another uploaded resume becomes the default automatically.</p>
+            <p>Use Update to replace a resume with a newer file — it keeps the same resume, so applications that used it stay linked.</p>
+            <p>A resume used in an application can't be deleted. If you delete your default resume, another uploaded resume becomes the default automatically.</p>
           </CardContent>
         </Card>
 

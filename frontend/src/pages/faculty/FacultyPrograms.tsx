@@ -52,7 +52,7 @@ export default function FacultyPrograms() {
     student: (s) => s.full_name,
     institute: (s) => s.institute_name,
     course: (s) => s.course_name,
-    branch: (s) => s.department,
+    branch: (s) => s.branch ?? s.department ?? '',
     semester: (s) => s.semester,
     cgpa: (s) => s.cgpa,
     status: (s) => s.source,
@@ -73,7 +73,7 @@ export default function FacultyPrograms() {
       student.gender || '',
       student.institute_name || '',
       student.course_name || '',
-      student.department || '',
+      student.branch ?? student.department ?? '',
       student.semester ?? '',
       student.batch || '',
       formatCGPA(student.cgpa, ''),
@@ -195,7 +195,7 @@ export default function FacultyPrograms() {
                             <TableCell>{cellOrDash(student.institute_name)}</TableCell>
                             <TableCell>{cellOrDash(student.course_name)}</TableCell>
                             <TableCell>
-                              <Badge variant="outline">{cellOrDash(student.department)}</Badge>
+                              <Badge variant="outline">{cellOrDash(student.branch ?? student.department)}</Badge>
                             </TableCell>
                             <TableCell>{cellOrDash(student.semester)}</TableCell>
                             <TableCell>

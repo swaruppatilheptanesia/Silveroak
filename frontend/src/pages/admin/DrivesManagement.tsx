@@ -1,4 +1,5 @@
-import { useDeferredValue, useMemo, useState } from 'react';
+import { useDeferredValue, useMemo, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   Calendar,
   CheckCircle,
@@ -12,6 +13,7 @@ import {
   Plus,
   Search,
   Send,
+  Upload,
   UserPlus,
 } from 'lucide-react';
 import { format } from 'date-fns';
@@ -46,12 +48,12 @@ import {
 } from '@/components/ui/table';
 import { SortableTableHead } from '@/components/shared/SortableTableHead';
 import { useServerSort } from '@/hooks/use-server-sort';
-import { useEvents, useUpdateEventStatus } from '@/hooks/use-event-api';
-import { usePostingTypeOptions } from '@/hooks/use-posting-type-options';
+import { useEvents, useUpdateEventStatus, eventKeys } from '@/hooks/use-event-api';
 import { driveService } from '@/services/driveService';
 import { EVENT_STATUS_CONFIG, getAllowedEventStatusActions, getEventListSearchFields } from '@/lib/eventModule';
-import { getEventTypeLabel, type ApiEventListItem, type ApiEventStatus, type ApiEventType } from '@/types/event';
-import { formatDate } from '@/lib/formatters';
+import { attendanceStatusLabels, getEventTypeLabel, type ApiEventListItem, type ApiEventStatus, type ApiEventType, type MarkAttendanceInput } from '@/types/event';
+import { parseAttendanceRows } from '@/lib/attendanceImport';
+import { formatDate, toDateParam } from '@/lib/formatters';
 import { downloadCsvTable, downloadExcelTable } from '@/lib/spreadsheetExport';
 import AdminListScopeFilters, { type DateRangeValue } from '@/components/admin/AdminListScopeFilters';
 import { useEventTypeOptions } from '@/hooks/use-event-type-options';
@@ -117,13 +119,17 @@ export default function AdminDrivesManagement() {
   const [searchTerm, setSearchTerm] = useState('');
   const [typeFilter, setTypeFilter] = useState<'all' | ApiEventType>('all');
   const [postingTypeFilter, setPostingTypeFilter] = useState<string>('all');
-  const { options: postingTypeOptions, isLoading: postingTypesLoading, isEmpty: postingTypesEmpty } = usePostingTypeOptions();
+  const [academicYearFilter, setAcademicYearFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | ApiEventStatus>('all');
   const [instituteFilter, setInstituteFilter] = useState('');
   const [courseFilter, setCourseFilter] = useState('');
   const [branchFilter, setBranchFilter] = useState('');
   const [dateRange, setDateRange] = useState<DateRangeValue>({ from: undefined, to: undefined });
   const [isExporting, setIsExporting] = useState(false);
+  const [attendanceBusyId, setAttendanceBusyId] = useState<string | null>(null);
+  const importEventIdRef = useRef<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
   const { sort_by, sort_order, onSort } = useServerSort<
     'title' | 'date' | 'status' | 'panels' | 'students'
@@ -148,8 +154,8 @@ export default function AdminDrivesManagement() {
     institute: instituteFilter || undefined,
     course: courseFilter || undefined,
     branch: branchFilter || undefined,
-    date_from: dateRange.from ? dateRange.from.toISOString() : undefined,
-    date_to: dateRange.to ? dateRange.to.toISOString() : undefined,
+    date_from: toDateParam(dateRange.from),
+    date_to: toDateParam(dateRange.to),
   };
 
   const eventsQuery = useEvents({
@@ -235,8 +241,16 @@ export default function AdminDrivesManagement() {
   async function handleExport(exportFormat: 'csv' | 'excel') {
     setIsExporting(true);
     try {
-      const result = await driveService.getEvents({ ...listFilters, limit: 1000, page: 1, sort_by: 'date', sort_order: 'desc' });
-      const rows = (result.data ?? []).map(eventExportRow);
+      // The backend caps `limit` at 100 (paginationSchema), so page and loop until a short/empty
+      // page. driveService pagination isn't normalized, so break on page-fullness, not hasNext.
+      const all: ApiEventListItem[] = [];
+      for (let currentPage = 1; currentPage <= 500; currentPage++) {
+        const result = await driveService.getEvents({ ...listFilters, page: currentPage, limit: 100, sort_by: 'date', sort_order: 'desc' });
+        const batch = result.data ?? [];
+        all.push(...batch);
+        if (batch.length < 100) break;
+      }
+      const rows = all.map(eventExportRow);
       if (rows.length === 0) {
         toast.info('No events match the current filters.');
         return;
@@ -255,6 +269,76 @@ export default function AdminDrivesManagement() {
       toast.error(formatApiErrorMessage(error, 'Unable to export events.'));
     } finally {
       setIsExporting(false);
+    }
+  }
+
+  async function handleAttendanceExport(event: ApiEventListItem) {
+    setAttendanceBusyId(event.id);
+    try {
+      const detail = await driveService.getEventDetail(event.id);
+      const rows = (detail.assigned_students ?? []).map((assignment) => [
+        assignment.student.enrollment_number,
+        assignment.student.full_name,
+        assignment.student.branch ?? assignment.student.department ?? '',
+        assignment.attendance ? attendanceStatusLabels[assignment.attendance as keyof typeof attendanceStatusLabels] ?? '' : '',
+      ]);
+      if (rows.length === 0) {
+        toast.info('No students are assigned to this drive yet.');
+        return;
+      }
+      const safeTitle = (event.title || 'attendance').replace(/[^a-z0-9]+/gi, '_').replace(/^_+|_+$/g, '').toLowerCase() || 'attendance';
+      await downloadExcelTable(['Enrollment No', 'Name', 'Branch', 'Status'], rows, `attendance_${safeTitle}`);
+      toast.success(`Exported attendance for ${rows.length} student(s).`);
+    } catch (error) {
+      toast.error(formatApiErrorMessage(error, 'Unable to export attendance.'));
+    } finally {
+      setAttendanceBusyId(null);
+    }
+  }
+
+  function triggerAttendanceImport(eventId: string) {
+    importEventIdRef.current = eventId;
+    fileInputRef.current?.click();
+  }
+
+  async function handleAttendanceFile(fileList: FileList | null) {
+    const file = fileList?.[0];
+    const eventId = importEventIdRef.current;
+    if (fileInputRef.current) fileInputRef.current.value = '';
+    if (!file || !eventId) return;
+    setAttendanceBusyId(eventId);
+    try {
+      const [detail, parsed] = await Promise.all([
+        driveService.getEventDetail(eventId),
+        parseAttendanceRows(file),
+      ]);
+      const enrollmentToStudentId = new Map<string, string>();
+      (detail.assigned_students ?? []).forEach((assignment) => {
+        enrollmentToStudentId.set(assignment.student.enrollment_number.trim().toLowerCase(), assignment.student_id);
+      });
+      const updates: MarkAttendanceInput[] = [];
+      let skipped = 0;
+      for (const row of parsed) {
+        const studentId = enrollmentToStudentId.get(row.enrollment.trim().toLowerCase());
+        if (!studentId) { skipped += 1; continue; }
+        updates.push({ student_id: studentId, attendance: row.status });
+      }
+      if (updates.length === 0) {
+        toast.info(skipped > 0 ? `No rows matched an assigned student (${skipped} skipped).` : 'No attendance rows found in the file.');
+        return;
+      }
+      const results = await Promise.allSettled(
+        updates.map((data) => driveService.markAttendance(eventId, data)),
+      );
+      const succeeded = results.filter((result) => result.status === 'fulfilled').length;
+      const failed = results.length - succeeded;
+      await queryClient.invalidateQueries({ queryKey: eventKeys.all });
+      await queryClient.invalidateQueries({ queryKey: eventKeys.detail(eventId) });
+      toast.success(`Updated ${succeeded} student(s).${skipped ? ` Skipped ${skipped} unmatched.` : ''}${failed ? ` ${failed} failed.` : ''}`);
+    } catch (error) {
+      toast.error(formatApiErrorMessage(error, 'Unable to import attendance.'));
+    } finally {
+      setAttendanceBusyId(null);
     }
   }
 
@@ -365,33 +449,6 @@ export default function AdminDrivesManagement() {
               </SelectContent>
             </Select>
 
-            <Select
-              value={postingTypeFilter}
-              onValueChange={(value) => {
-                setPostingTypeFilter(value);
-                setPage(1);
-              }}
-              disabled={postingTypesLoading}
-            >
-              <SelectTrigger className="w-full lg:w-52">
-                <SelectValue placeholder="Posting Type" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Posting Types</SelectItem>
-                {postingTypesEmpty ? (
-                  <SelectItem value="__empty__" disabled>
-                    No posting types defined
-                  </SelectItem>
-                ) : (
-                  postingTypeOptions.map((option) => (
-                    <SelectItem key={option.id} value={option.id}>
-                      {option.label}
-                    </SelectItem>
-                  ))
-                )}
-              </SelectContent>
-            </Select>
-
             <Button onClick={() => setCreateOpen(true)}>
               <Plus className="mr-2 h-4 w-4" />
               Create Event
@@ -401,6 +458,8 @@ export default function AdminDrivesManagement() {
               institute={{ value: instituteFilter, onChange: (value) => { setInstituteFilter(value); setPage(1); } }}
               course={{ value: courseFilter, onChange: (value) => { setCourseFilter(value); setPage(1); } }}
               branch={{ value: branchFilter, onChange: (value) => { setBranchFilter(value); setPage(1); } }}
+              academicYear={{ value: academicYearFilter, onChange: (value) => { setAcademicYearFilter(value); setPage(1); } }}
+              postingType={{ value: postingTypeFilter, onChange: (value) => { setPostingTypeFilter(value); setPage(1); }, bind: 'id' }}
               dateRange={{ value: dateRange, onChange: (range) => { setDateRange(range); setPage(1); } }}
             />
           </CardContent>
@@ -513,6 +572,18 @@ export default function AdminDrivesManagement() {
                                 Attendance
                               </Button>
                             )}
+                            {event._count.assigned_students > 0 && (
+                              <Button variant="outline" size="sm" disabled={attendanceBusyId === event.id} onClick={() => handleAttendanceExport(event)}>
+                                {attendanceBusyId === event.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
+                                Att. Export
+                              </Button>
+                            )}
+                            {event._count.assigned_students > 0 && (
+                              <Button variant="outline" size="sm" disabled={attendanceBusyId === event.id} onClick={() => triggerAttendanceImport(event.id)}>
+                                {attendanceBusyId === event.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Upload className="mr-2 h-4 w-4" />}
+                                Att. Import
+                              </Button>
+                            )}
                             {getAllowedEventStatusActions(event.status).map((nextStatus) => (
                               <Button
                                 key={nextStatus}
@@ -587,6 +658,13 @@ export default function AdminDrivesManagement() {
           onOpenChange={(open) => !open && setAttendanceEventId(null)}
         />
       )}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".xlsx,.csv"
+        className="hidden"
+        onChange={(event) => handleAttendanceFile(event.target.files)}
+      />
       {panelEventId && (
         <EventPanelDialog
           eventId={panelEventId}

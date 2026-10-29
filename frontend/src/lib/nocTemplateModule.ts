@@ -85,7 +85,7 @@ export function buildNocTemplatePreviewValuesFromRequest(record: NocTemplateReco
     contact_person_designation: record.contact_person_designation || undefined,
     student_name: 'student' in record ? record.student.full_name : 'Student Name',
     enrollment_number: 'student' in record ? record.student.enrollment_number : '—',
-    branch: 'student' in record ? record.student.department : '—',
+    branch: 'student' in record ? (record.student.branch ?? record.student.department) : '—',
     semester: 'student' in record ? String(record.student.current_semester ?? '—') : '—',
     batch: 'student' in record ? record.student.batch : undefined,
     course: 'student' in record ? record.student.course ?? undefined : undefined,

@@ -49,6 +49,7 @@ export interface FacultyStudentListItem {
   mobile: string | null;
   batch: string;
   department: string;
+  branch: string | null;
   cgpa: number | null;
   backlogs: number;
   active_backlogs: number;
@@ -176,6 +177,7 @@ export interface FacultyProgramStudent {
   institute_name: string | null;
   course_name: string | null;
   department: string;
+  branch: string | null;
   semester: number | null;
   batch: string;
   cgpa: number | null;

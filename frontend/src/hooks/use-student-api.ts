@@ -238,6 +238,18 @@ export function useUploadResume() {
   });
 }
 
+export function useUpdateResume() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ resumeId, file, name }: { resumeId: string; file: File; name?: string }) =>
+      studentService.updateResume(resumeId, file, name),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: studentKeys.resumes() });
+      qc.invalidateQueries({ queryKey: studentKeys.profile() });
+    },
+  });
+}
+
 export function useSetDefaultResume() {
   const qc = useQueryClient();
   return useMutation({

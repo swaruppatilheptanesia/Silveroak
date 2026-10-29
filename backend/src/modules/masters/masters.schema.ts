@@ -9,6 +9,15 @@ const masterValueSchema = z
   .min(1, 'Value is required')
   .max(150, 'Value must be 150 characters or fewer');
 
+// posting_type only: one cascading targeting row (Institute → Course → Branch → Semester). Every cell is
+// required; a student matching ANY row is eligible. Semester may be multiple.
+const scopeRowSchema = z.object({
+  institute: z.string().trim().min(1),
+  course: z.string().trim().min(1),
+  branch: z.string().trim().min(1),
+  semesters: z.array(z.string()).min(1),
+});
+
 export const queryMastersSchema = z.object({
   category: masterCategorySchema.optional(),
   // When "true", bypass the student posting-type targeting filter (used by the NOC wizard's
@@ -36,6 +45,7 @@ export const createMasterSchema = z.object({
   target_branches: z.array(z.string()).default([]),
   target_semesters: z.array(z.string()).default([]),
   target_academic_years: z.array(z.string()).default([]),
+  scope_rows: z.array(scopeRowSchema).default([]),
   is_active: z.boolean().optional(),
   accepting_applications: z.boolean().optional(),
 });
@@ -48,6 +58,7 @@ export const updateMasterSchema = z
     target_branches: z.array(z.string()).optional(),
     target_semesters: z.array(z.string()).optional(),
     target_academic_years: z.array(z.string()).optional(),
+    scope_rows: z.array(scopeRowSchema).optional(),
     is_active: z.boolean().optional(),
     accepting_applications: z.boolean().optional(),
   })
@@ -59,6 +70,7 @@ export const updateMasterSchema = z
       || value.target_branches !== undefined
       || value.target_semesters !== undefined
       || value.target_academic_years !== undefined
+      || value.scope_rows !== undefined
       || value.is_active !== undefined
       || value.accepting_applications !== undefined,
     {

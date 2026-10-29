@@ -1,5 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { ListPager } from '@/components/shared/ListPager';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
@@ -38,6 +39,7 @@ import {
   useVerifyAdminStudent,
 } from '@/hooks/use-admin-api';
 import { usePostingTypeOptions } from '@/hooks/use-posting-type-options';
+import { filterPostingTypeOptionsByAcademicYear } from '@/lib/postingModule';
 import { useMasterValues } from '@/hooks/use-master-api';
 import type { ApiAdminStudent } from '@/types/admin';
 
@@ -84,16 +86,19 @@ export default function VerificationTab() {
   } = usePostingTypeOptions();
   const academicYearOptions = useMasterValues('academic_year').data ?? [];
 
+  const [page, setPage] = useState(1);
+  useEffect(() => { setPage(1); }, [statusFilter, searchQuery, postingTypeFilter, academicYearFilter]);
+
   const pendingParams = useMemo(() => ({
     verification_status: statusFilter,
     search: searchQuery || undefined,
     posting_type_master_id: postingTypeFilter === 'all' ? undefined : postingTypeFilter,
     academic_year: academicYearFilter === 'all' ? undefined : academicYearFilter,
-    page: 1,
-    limit: 100,
+    page,
+    limit: 20,
     sort_by: 'updated_at' as const,
     sort_order: 'desc' as const,
-  }), [statusFilter, searchQuery, postingTypeFilter, academicYearFilter]);
+  }), [statusFilter, searchQuery, postingTypeFilter, academicYearFilter, page]);
 
   // Actions available depend on the status of the list being viewed.
   const canVerifyList = statusFilter !== 'verified'; // pending + rejected can be (re)verified
@@ -292,29 +297,7 @@ export default function VerificationTab() {
                 className="pl-10"
               />
             </div>
-            <Select
-              value={postingTypeFilter}
-              onValueChange={setPostingTypeFilter}
-              disabled={postingTypesLoading}
-            >
-              <SelectTrigger className="w-full md:w-52">
-                <SelectValue placeholder="Posting Type" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Posting Types</SelectItem>
-                {postingTypesEmpty ? (
-                  <SelectItem value="__empty__" disabled>
-                    No posting types defined
-                  </SelectItem>
-                ) : (
-                  postingTypeOptions.map((option) => (
-                    <SelectItem key={option.id} value={option.id}>
-                      {option.label}
-                    </SelectItem>
-                  ))
-                )}
-              </SelectContent>
-            </Select>
+            {/* Academic Year renders before Posting Type — the year narrows the posting-type options. */}
             <Select value={academicYearFilter} onValueChange={setAcademicYearFilter}>
               <SelectTrigger className="w-full md:w-44">
                 <SelectValue placeholder="Academic Year" />
@@ -324,6 +307,29 @@ export default function VerificationTab() {
                 {academicYearOptions.map((year) => (
                   <SelectItem key={year} value={year}>{year}</SelectItem>
                 ))}
+              </SelectContent>
+            </Select>
+            <Select
+              value={postingTypeFilter}
+              onValueChange={setPostingTypeFilter}
+              disabled={postingTypesLoading || !academicYearFilter}
+            >
+              <SelectTrigger className="w-full md:w-52">
+                <SelectValue placeholder={!academicYearFilter ? 'Select year first' : 'Posting Type'} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Posting Types</SelectItem>
+                {postingTypesEmpty ? (
+                  <SelectItem value="__empty__" disabled>
+                    No posting types defined
+                  </SelectItem>
+                ) : (
+                  filterPostingTypeOptionsByAcademicYear(postingTypeOptions, academicYearFilter).map((option) => (
+                    <SelectItem key={option.id} value={option.id}>
+                      {option.label}
+                    </SelectItem>
+                  ))
+                )}
               </SelectContent>
             </Select>
             {canVerifyList && selectedVisibleIds.length > 0 && (
@@ -402,7 +408,7 @@ export default function VerificationTab() {
                       )}
                     </div>
                     <div className="flex flex-wrap gap-4 text-sm text-muted-foreground">
-                      <span>{student.department}</span>
+                      <span>{student.branch ?? '—'}</span>
                       <span>•</span>
                       <span>CGPA: {formatCGPA(student.academicProfile.cgpa)}</span>
                       <span>•</span>
@@ -455,6 +461,11 @@ export default function VerificationTab() {
               ))}
             </div>
           )}
+          <ListPager
+            page={pendingStudentsQuery.data?.pagination.page ?? 1}
+            totalPages={pendingStudentsQuery.data?.pagination.totalPages ?? 1}
+            onPageChange={setPage}
+          />
         </CardContent>
       </Card>
 
@@ -484,8 +495,8 @@ export default function VerificationTab() {
                   <p className="font-medium">{selectedStudent.mobile || '—'}</p>
                 </div>
                 <div>
-                  <p className="text-sm text-muted-foreground">Department</p>
-                  <p className="font-medium">{selectedStudent.department}</p>
+                  <p className="text-sm text-muted-foreground">Branch</p>
+                  <p className="font-medium">{selectedStudent.branch ?? '—'}</p>
                 </div>
                 <div>
                   <p className="text-sm text-muted-foreground">Batch</p>

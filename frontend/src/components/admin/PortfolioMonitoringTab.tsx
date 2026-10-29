@@ -9,11 +9,9 @@ import { SortableTableHead } from '@/components/shared/SortableTableHead';
 import { useClientSort } from '@/hooks/use-client-sort';
 import {
   Search,
-  Filter,
   Eye,
   EyeOff,
   FolderKanban,
-  Briefcase,
   Users,
   CheckCircle,
   FileEdit,
@@ -21,12 +19,11 @@ import {
 import { format } from 'date-fns';
 import { AdminStudentDetailsDialog } from '@/components/admin/AdminStudentDetailsDialog';
 import AdminListScopeFilters from '@/components/admin/AdminListScopeFilters';
-import { useAdminDepartmentOptions, useAdminPortfolios } from '@/hooks/use-admin-api';
+import { useAdminPortfolios } from '@/hooks/use-admin-api';
 
 export default function PortfolioMonitoringTab() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
-  const [deptFilter, setDeptFilter] = useState('all');
   const [instituteFilter, setInstituteFilter] = useState('');
   const [courseFilter, setCourseFilter] = useState('');
   const [branchFilter, setBranchFilter] = useState('');
@@ -36,25 +33,22 @@ export default function PortfolioMonitoringTab() {
   const portfolioParams = useMemo(() => ({
     search: search || undefined,
     status: statusFilter === 'all' ? undefined : statusFilter as 'draft' | 'published',
-    department: deptFilter === 'all' ? undefined : deptFilter,
     institute: instituteFilter || undefined,
     course: courseFilter || undefined,
     branch: branchFilter || undefined,
     semester: semesterFilter === 'all' ? undefined : semesterFilter,
-  }), [branchFilter, courseFilter, deptFilter, instituteFilter, search, semesterFilter, statusFilter]);
+  }), [branchFilter, courseFilter, instituteFilter, search, semesterFilter, statusFilter]);
 
   const portfoliosQuery = useAdminPortfolios(portfolioParams);
-  const departmentOptionsQuery = useAdminDepartmentOptions();
   const portfolios = portfoliosQuery.data?.data ?? [];
   const { sorted: sortedPortfolios, sort_by, sort_order, onSort } = useClientSort(portfolios, {
     student: (p) => p.student_name,
-    department: (p) => p.department,
+    branch: (p) => p.branch ?? '',
     projects: (p) => p.project_count,
     internships: (p) => p.internship_count,
     status: (p) => p.status,
     last_updated: (p) => new Date(p.last_updated),
   });
-  const departmentOptions = departmentOptionsQuery.data ?? [];
   const stats = portfoliosQuery.data?.stats ?? {
     total: 0,
     published: 0,
@@ -66,7 +60,7 @@ export default function PortfolioMonitoringTab() {
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
         <Card>
           <CardContent className="pb-4 pt-4">
             <div className="mb-1 flex items-center gap-2 text-muted-foreground">
@@ -103,15 +97,6 @@ export default function PortfolioMonitoringTab() {
             <p className="text-2xl font-bold">{stats.withProjects}</p>
           </CardContent>
         </Card>
-        <Card>
-          <CardContent className="pb-4 pt-4">
-            <div className="mb-1 flex items-center gap-2 text-muted-foreground">
-              <Briefcase className="h-4 w-4" />
-              <span className="text-xs">Avg Projects</span>
-            </div>
-            <p className="text-2xl font-bold">{stats.avgProjects}</p>
-          </CardContent>
-        </Card>
       </div>
 
       <Card>
@@ -142,20 +127,6 @@ export default function PortfolioMonitoringTab() {
                 <SelectItem value="draft">Draft</SelectItem>
               </SelectContent>
             </Select>
-            <Select value={deptFilter} onValueChange={setDeptFilter}>
-              <SelectTrigger className="w-full md:w-56">
-                <Filter className="mr-2 h-4 w-4" />
-                <SelectValue placeholder="Department" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Departments</SelectItem>
-                {departmentOptions.map((department) => (
-                  <SelectItem key={department} value={department}>
-                    {department}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
           </div>
 
           <div className="mb-4">
@@ -172,7 +143,7 @@ export default function PortfolioMonitoringTab() {
               <TableHeader>
                 <TableRow>
                   <SortableTableHead label="Student" columnKey="student" sortBy={sort_by} sortOrder={sort_order} onSort={onSort} />
-                  <SortableTableHead label="Department" columnKey="department" sortBy={sort_by} sortOrder={sort_order} onSort={onSort} />
+                  <SortableTableHead label="Branch" columnKey="branch" sortBy={sort_by} sortOrder={sort_order} onSort={onSort} />
                   <SortableTableHead label="Projects" columnKey="projects" className="text-center" sortBy={sort_by} sortOrder={sort_order} onSort={onSort} />
                   <SortableTableHead label="Internships" columnKey="internships" className="text-center" sortBy={sort_by} sortOrder={sort_order} onSort={onSort} />
                   <SortableTableHead label="Status" columnKey="status" sortBy={sort_by} sortOrder={sort_order} onSort={onSort} />
@@ -202,7 +173,7 @@ export default function PortfolioMonitoringTab() {
                           <p className="text-xs text-muted-foreground">{portfolio.enrollment_number}</p>
                         </div>
                       </TableCell>
-                      <TableCell className="text-sm">{portfolio.department}</TableCell>
+                      <TableCell className="text-sm">{portfolio.branch ?? '—'}</TableCell>
                       <TableCell className="text-center">
                         <Badge variant="secondary">{portfolio.project_count}</Badge>
                       </TableCell>

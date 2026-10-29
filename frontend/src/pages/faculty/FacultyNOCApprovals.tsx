@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useDeferredValue, useEffect, useState } from 'react';
 import {
   CheckCircle,
   Clock,
@@ -14,6 +14,7 @@ import { toast } from 'sonner';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { NOCReviewDialog } from '@/components/noc/NOCReviewDialog';
 import { EmptyState } from '@/components/shared/EmptyState';
+import { ListPager } from '@/components/shared/ListPager';
 import AdminListScopeFilters, { type DateRangeValue } from '@/components/admin/AdminListScopeFilters';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -32,12 +33,22 @@ import {
 } from '@/components/ui/table';
 import { SortableTableHead, type SortOrder } from '@/components/shared/SortableTableHead';
 import { useServerSort } from '@/hooks/use-server-sort';
-import { useNocs } from '@/hooks/use-noc-api';
-import { usePostingTypeOptions } from '@/hooks/use-posting-type-options';
-import { getNocDepartment, getNocProgramLabel, getNocSearchFields, getNocStudentName } from '@/lib/nocModule';
+import { useNocs, useFacultyNocSummary } from '@/hooks/use-noc-api';
+import { nocService } from '@/services/nocService';
+import { getNocBranch, getNocProgramLabel, getNocStudentName } from '@/lib/nocModule';
+import { toDateParam } from '@/lib/formatters';
 import { resolveBackendAssetUrl } from '@/lib/studentModule';
 import { downloadCsvTable, downloadExcelTable } from '@/lib/spreadsheetExport';
-import { NOC_STATUS_CONFIG, NOC_TYPE_LABELS, type ApiNocListItem } from '@/types/noc';
+import { NOC_STATUS_CONFIG, NOC_TYPE_LABELS, type ApiNocListItem, type NOCStatus } from '@/types/noc';
+
+const REVIEWED_STATUSES: NOCStatus[] = [
+  'pending_tpo',
+  'pending_company_verification',
+  'approved',
+  'issued',
+  'rejected',
+];
+const EXPORT_PAGE_SIZE = 100;
 
 function getErrorMessage(error: unknown, fallback = 'Something went wrong') {
   return error instanceof Error ? error.message : fallback;
@@ -93,6 +104,7 @@ function NocTable({
             <SortableTableHead label="Duration" columnKey="start_date" sortBy={sortBy} sortOrder={sortOrder} onSort={onSort} />
             <TableHead>NOC Number</TableHead>
             <SortableTableHead label="Status" columnKey="status" sortBy={sortBy} sortOrder={sortOrder} onSort={onSort} />
+            <TableHead className="whitespace-nowrap">NOC Status</TableHead>
             <TableHead className="text-right">Action</TableHead>
           </TableRow>
         </TableHeader>
@@ -103,7 +115,7 @@ function NocTable({
                 <div>
                   <p className="font-medium text-foreground">{getNocStudentName(request)}</p>
                   <p className="text-xs text-muted-foreground">{request.student.enrollment_number}</p>
-                  <p className="text-xs text-muted-foreground">{getNocDepartment(request)}</p>
+                  <p className="text-xs text-muted-foreground">{getNocBranch(request)}</p>
                 </div>
               </TableCell>
               <TableCell>
@@ -129,6 +141,16 @@ function NocTable({
                   {NOC_STATUS_CONFIG[request.status].label}
                 </Badge>
               </TableCell>
+              <TableCell>
+                <div className="flex flex-col items-start gap-1">
+                  <Badge variant={request.is_active === false ? 'outline' : 'default'} className="whitespace-nowrap">
+                    {request.is_active === false ? 'Inactive' : 'Active'}
+                  </Badge>
+                  {request.is_reissue ? (
+                    <Badge variant="secondary" className="whitespace-nowrap text-xs">Re-Issued</Badge>
+                  ) : null}
+                </div>
+              </TableCell>
               <TableCell className="text-right">
                 <Button variant="outline" size="sm" onClick={() => onReview(request.id)}>
                   <Eye className="mr-2 h-4 w-4" />
@@ -149,84 +171,115 @@ export default function FacultyNOCApprovals() {
   const [postingTypeFilter, setPostingTypeFilter] = useState('all');
   const [academicYearFilter, setAcademicYearFilter] = useState('all');
   const [dateRange, setDateRange] = useState<DateRangeValue>({ from: undefined, to: undefined });
-  const { options: postingTypeOptions, isLoading: postingTypesLoading } = usePostingTypeOptions();
+
+  const deferredSearch = useDeferredValue(searchTerm);
+  const search = deferredSearch.trim() || undefined;
+  const [pendingPage, setPendingPage] = useState(1);
+  const [reviewedPage, setReviewedPage] = useState(1);
+  const [isExporting, setIsExporting] = useState(false);
 
   const { sort_by, sort_order, onSort } = useServerSort<
     'student' | 'noc_type' | 'company' | 'start_date' | 'status' | 'created_at'
-  >('created_at', 'desc');
+  >('created_at', 'desc', () => { setPendingPage(1); setReviewedPage(1); });
 
-  // Counters come from the full department-scoped set so they stay stable regardless of table filters.
-  const countsQuery = useNocs({ page: 1, limit: 100, sort_by: 'created_at', sort_order: 'desc' });
-  const requestsQuery = useNocs({
-    page: 1,
-    limit: 100,
-    // NOC.program stores the posting-type VALUE — bind option.value below.
-    posting_type: postingTypeFilter === 'all' ? undefined : postingTypeFilter,
-    academic_year: academicYearFilter === 'all' ? undefined : academicYearFilter,
-    date_from: dateRange.from ? dateRange.from.toISOString() : undefined,
-    date_to: dateRange.to ? dateRange.to.toISOString() : undefined,
+  // NOC.program stores the posting-type VALUE — bind option.value below.
+  const postingType = postingTypeFilter === 'all' ? undefined : postingTypeFilter;
+  const academicYear = academicYearFilter === 'all' ? undefined : academicYearFilter;
+  const dateFrom = toDateParam(dateRange.from);
+  const dateTo = toDateParam(dateRange.to);
+
+  useEffect(() => {
+    setPendingPage(1);
+    setReviewedPage(1);
+  }, [deferredSearch, postingType, academicYear, dateFrom, dateTo]);
+
+  // Stat cards come from a dedicated department-wide aggregate (the rejected-by-dept/tpo split needs
+  // faculty_approved_at, which a page of rows can't provide).
+  const summaryQuery = useFacultyNocSummary();
+  const summary = summaryQuery.data ?? {
+    pending_faculty: 0,
+    approved_forwarded: 0,
+    approved_by_tpo: 0,
+    rejected_by_dept: 0,
+    rejected_by_tpo: 0,
+    total: 0,
+  };
+
+  const commonParams = {
+    posting_type: postingType,
+    academic_year: academicYear,
+    date_from: dateFrom,
+    date_to: dateTo,
+    search,
     sort_by,
     sort_order,
-  });
+  } as const;
 
-  const counts = countsQuery.data?.data ?? [];
-  // ApiNocRecord carries no faculty/tpo decision flag — derive the stage from status + faculty_approved_at:
-  // a rejected NOC that faculty already approved was rejected at TPO; otherwise it was rejected at faculty.
-  const rejectedByDept = counts.filter((item) => item.status === 'rejected' && !item.faculty_approved_at).length;
-  const rejectedByTpo = counts.filter((item) => item.status === 'rejected' && Boolean(item.faculty_approved_at)).length;
-  const approvedByTpo = counts.filter((item) => item.status === 'approved' || item.status === 'issued').length;
+  const pendingQuery = useNocs({ ...commonParams, page: pendingPage, limit: 20, statuses: ['pending_faculty'] });
+  const reviewedQuery = useNocs({ ...commonParams, page: reviewedPage, limit: 20, statuses: REVIEWED_STATUSES });
 
-  const requests = requestsQuery.data?.data ?? [];
-  const filteredRequests = useMemo(() => {
-    if (!searchTerm) return requests;
-    const query = searchTerm.toLowerCase();
-    return requests.filter((request) =>
-      getNocSearchFields(request).some((field) => field.toLowerCase().includes(query))
-    );
-  }, [requests, searchTerm]);
+  const pendingRequests = pendingQuery.data?.data ?? [];
+  const reviewedRequests = reviewedQuery.data?.data ?? [];
+  const pendingTotal = pendingQuery.data?.pagination.total ?? 0;
+  const reviewedTotal = reviewedQuery.data?.pagination.total ?? 0;
+  const requestsQuery = { error: pendingQuery.error ?? reviewedQuery.error };
 
-  function handleExport(exportFormat: 'csv' | 'excel') {
-    if (filteredRequests.length === 0) {
-      toast.info('No NOC requests match the current filters.');
-      return;
+  async function handleExport(exportFormat: 'csv' | 'excel') {
+    setIsExporting(true);
+    try {
+      // Export every matching request across all statuses (current filters + search applied), paging
+      // the list endpoint — nocService pagination is normalized, so read pagination.hasNext.
+      const all: ApiNocListItem[] = [];
+      let page = 1;
+      for (;;) {
+        const res = await nocService.getNocs({ ...commonParams, page, limit: EXPORT_PAGE_SIZE });
+        all.push(...res.data);
+        if (page >= (res.pagination.totalPages ?? 1) || res.data.length === 0) break;
+        page += 1;
+      }
+      if (all.length === 0) {
+        toast.info('No NOC requests match the current filters.');
+        return;
+      }
+      const headers = [
+        'Student Name', 'Enrollment No', 'Institute', 'Course', 'Branch', 'Semester', 'Posting Type', 'Company',
+        'Technology / Domain', 'Stipend', 'Status', 'NOC Status', 'Re-Issued', 'Reason for Company Change',
+        'Offer Letter Link', 'Termination Letter Link', 'NOC Certificate Number',
+        'NOC Certificate Link', 'Completion Certificate Link',
+      ];
+      const rows = all.map((request) => [
+        getNocStudentName(request),
+        request.student.enrollment_number,
+        request.student.institute ?? '',
+        request.student.course ?? '',
+        getNocBranch(request),
+        request.student.current_semester ?? '',
+        getNocProgramLabel(request.program),
+        request.company_name,
+        request.technology_domain ?? '',
+        request.stipend_amount != null ? String(request.stipend_amount) : '',
+        NOC_STATUS_CONFIG[request.status].label,
+        request.is_active === false ? 'Inactive' : 'Active',
+        request.is_reissue ? 'Yes' : 'No',
+        request.reason_for_company_change ?? '',
+        request.offer_letter_url ? resolveBackendAssetUrl(request.offer_letter_url) : '',
+        request.termination_letter_url ? resolveBackendAssetUrl(request.termination_letter_url) : '',
+        request.status === 'issued' ? (request.noc_number ?? '') : '',
+        request.certificate_url ? resolveBackendAssetUrl(request.certificate_url) : '',
+        '', // Completion Certificate Link — no such field on NOC records (read-only gap)
+      ]);
+      if (exportFormat === 'excel') {
+        await downloadExcelTable(headers, rows, 'faculty_noc_requests');
+      } else {
+        downloadCsvTable(headers, rows, 'faculty_noc_requests');
+      }
+      toast.success(`Exported ${rows.length} NOC request(s).`);
+    } catch (error) {
+      toast.error(getErrorMessage(error, 'Unable to export NOC requests.'));
+    } finally {
+      setIsExporting(false);
     }
-    const headers = [
-      'Student Name', 'Enrollment No', 'Institute', 'Course', 'Branch', 'Semester', 'Posting Type', 'Company',
-      'Technology / Domain', 'Stipend', 'Status', 'Offer Letter Link', 'NOC Certificate Number',
-      'NOC Certificate Link', 'Completion Certificate Link',
-    ];
-    const rows = filteredRequests.map((request) => [
-      getNocStudentName(request),
-      request.student.enrollment_number,
-      request.student.institute ?? '',
-      request.student.course ?? '',
-      getNocDepartment(request),
-      request.student.current_semester ?? '',
-      getNocProgramLabel(request.program),
-      request.company_name,
-      request.technology_domain ?? '',
-      request.stipend_amount != null ? String(request.stipend_amount) : '',
-      NOC_STATUS_CONFIG[request.status].label,
-      request.offer_letter_url ? resolveBackendAssetUrl(request.offer_letter_url) : '',
-      request.status === 'issued' ? (request.noc_number ?? '') : '',
-      request.certificate_url ? resolveBackendAssetUrl(request.certificate_url) : '',
-      '', // Completion Certificate Link — no such field on NOC records (read-only gap)
-    ]);
-    if (exportFormat === 'excel') {
-      void downloadExcelTable(headers, rows, 'faculty_noc_requests');
-    } else {
-      downloadCsvTable(headers, rows, 'faculty_noc_requests');
-    }
-    toast.success(`Exported ${rows.length} NOC request(s).`);
   }
-  const pendingRequests = useMemo(
-    () => filteredRequests.filter((request) => request.status === 'pending_faculty'),
-    [filteredRequests]
-  );
-  const reviewedRequests = useMemo(
-    () => filteredRequests.filter((request) => request.status !== 'pending_faculty'),
-    [filteredRequests]
-  );
 
   return (
     <DashboardLayout
@@ -245,12 +298,12 @@ export default function FacultyNOCApprovals() {
         )}
 
         <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-6">
-          <StatCard title="Pending Approval" value={counts.filter((item) => item.status === 'pending_faculty').length} hint="Awaiting your action" />
-          <StatCard title="Approved / Forwarded" value={counts.filter((item) => item.status === 'pending_tpo' || item.status === 'approved' || item.status === 'issued').length} hint="Already moved ahead" />
-          <StatCard title="Approved by TPO" value={approvedByTpo} hint="Cleared by the TPO cell" />
-          <StatCard title="Rejected by Department" value={rejectedByDept} hint="Rejected at faculty review" />
-          <StatCard title="Rejected by TPO" value={rejectedByTpo} hint="Rejected at TPO review" />
-          <StatCard title="Total Department Requests" value={counts.length} hint="Department-scoped live records" />
+          <StatCard title="Pending Approval" value={summary.pending_faculty} hint="Awaiting your action" />
+          <StatCard title="Approved / Forwarded" value={summary.approved_forwarded} hint="Already moved ahead" />
+          <StatCard title="Approved by TPO" value={summary.approved_by_tpo} hint="Cleared by the TPO cell" />
+          <StatCard title="Rejected by Department" value={summary.rejected_by_dept} hint="Rejected at faculty review" />
+          <StatCard title="Rejected by TPO" value={summary.rejected_by_tpo} hint="Rejected at TPO review" />
+          <StatCard title="Total Department Requests" value={summary.total} hint="Department-scoped live records" />
         </div>
 
         <Card>
@@ -263,12 +316,12 @@ export default function FacultyNOCApprovals() {
                 </CardDescription>
               </div>
               <div className="flex flex-wrap gap-2">
-                <Button variant="outline" onClick={() => handleExport('csv')}>
-                  <Download className="mr-2 h-4 w-4" />
+                <Button variant="outline" disabled={isExporting} onClick={() => void handleExport('csv')}>
+                  {isExporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
                   Export CSV
                 </Button>
-                <Button variant="outline" onClick={() => handleExport('excel')}>
-                  <FileSpreadsheet className="mr-2 h-4 w-4" />
+                <Button variant="outline" disabled={isExporting} onClick={() => void handleExport('excel')}>
+                  {isExporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileSpreadsheet className="mr-2 h-4 w-4" />}
                   Export Excel
                 </Button>
               </div>
@@ -285,23 +338,10 @@ export default function FacultyNOCApprovals() {
                   onChange={(event) => setSearchTerm(event.target.value)}
                 />
               </div>
-              {/* NOC.program stores the posting-type VALUE string — bind option.value (not option.id). */}
-              <Select value={postingTypeFilter} onValueChange={setPostingTypeFilter} disabled={postingTypesLoading}>
-                <SelectTrigger className="w-full lg:w-56">
-                  <SelectValue placeholder="Posting Type" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Posting Types</SelectItem>
-                  {postingTypeOptions.map((option) => (
-                    <SelectItem key={option.id} value={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
             </div>
             <AdminListScopeFilters
               academicYear={{ value: academicYearFilter, onChange: setAcademicYearFilter }}
+              postingType={{ value: postingTypeFilter, onChange: setPostingTypeFilter, bind: 'value' }}
               dateRange={{ value: dateRange, onChange: setDateRange }}
             />
           </CardContent>
@@ -309,8 +349,8 @@ export default function FacultyNOCApprovals() {
 
         <Tabs defaultValue="pending" className="space-y-4">
           <TabsList>
-            <TabsTrigger value="pending">Pending ({pendingRequests.length})</TabsTrigger>
-            <TabsTrigger value="history">History ({reviewedRequests.length})</TabsTrigger>
+            <TabsTrigger value="pending">Pending ({pendingTotal})</TabsTrigger>
+            <TabsTrigger value="history">History ({reviewedTotal})</TabsTrigger>
           </TabsList>
 
           <TabsContent value="pending">
@@ -325,21 +365,28 @@ export default function FacultyNOCApprovals() {
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                {requestsQuery.isLoading ? (
+                {pendingQuery.isLoading ? (
                   <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
                     <Loader2 className="h-4 w-4 animate-spin" />
                     Loading live department requests...
                   </div>
                 ) : (
-                  <NocTable
-                    requests={pendingRequests}
-                    emptyTitle="No pending NOC requests"
-                    emptyDescription="Your department does not have any requests waiting for faculty approval."
-                    onReview={setSelectedNocId}
-                    sortBy={sort_by}
-                    sortOrder={sort_order}
-                    onSort={onSort}
-                  />
+                  <>
+                    <NocTable
+                      requests={pendingRequests}
+                      emptyTitle="No pending NOC requests"
+                      emptyDescription="Your department does not have any requests waiting for faculty approval."
+                      onReview={setSelectedNocId}
+                      sortBy={sort_by}
+                      sortOrder={sort_order}
+                      onSort={onSort}
+                    />
+                    <ListPager
+                      page={pendingQuery.data?.pagination.page ?? 1}
+                      totalPages={pendingQuery.data?.pagination.totalPages ?? 1}
+                      onPageChange={setPendingPage}
+                    />
+                  </>
                 )}
               </CardContent>
             </Card>
@@ -357,21 +404,28 @@ export default function FacultyNOCApprovals() {
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                {requestsQuery.isLoading ? (
+                {reviewedQuery.isLoading ? (
                   <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
                     <Loader2 className="h-4 w-4 animate-spin" />
                     Loading review history...
                   </div>
                 ) : (
-                  <NocTable
-                    requests={reviewedRequests}
-                    emptyTitle="No reviewed requests"
-                    emptyDescription="Approved, issued, and rejected requests will appear here."
-                    onReview={setSelectedNocId}
-                    sortBy={sort_by}
-                    sortOrder={sort_order}
-                    onSort={onSort}
-                  />
+                  <>
+                    <NocTable
+                      requests={reviewedRequests}
+                      emptyTitle="No reviewed requests"
+                      emptyDescription="Approved, issued, and rejected requests will appear here."
+                      onReview={setSelectedNocId}
+                      sortBy={sort_by}
+                      sortOrder={sort_order}
+                      onSort={onSort}
+                    />
+                    <ListPager
+                      page={reviewedQuery.data?.pagination.page ?? 1}
+                      totalPages={reviewedQuery.data?.pagination.totalPages ?? 1}
+                      onPageChange={setReviewedPage}
+                    />
+                  </>
                 )}
               </CardContent>
             </Card>

@@ -14,6 +14,7 @@ const studentSelection = {
   enrollment_number: true,
   roll_number: true,
   department: true,
+  branch: true,
   batch: true,
   course: true,
   email: true,
@@ -198,6 +199,21 @@ export async function getNoDuesRequests(tenantId: string, filters: QueryNoDuesIn
     prisma.noDuesRequest.count({ where }),
   ]);
   return { data: requests, pagination: paginate(page, limit, total) };
+}
+
+/**
+ * Distinct Student.batch values ("passing years") among students who have a No Dues request.
+ * Drives the No Dues Management "Passing Year" filter — the filter matches Student.batch, so the
+ * options must be real batch strings (NOT academic_year master values).
+ */
+export async function getNoDuesPassingYears(tenantId: string): Promise<string[]> {
+  const rows = await prisma.student.findMany({
+    where: { tenant_id: tenantId, no_dues_requests: { some: {} } },
+    select: { batch: true },
+    distinct: ['batch'],
+    orderBy: { batch: 'desc' },
+  });
+  return rows.map((row) => row.batch).filter((batch): batch is string => Boolean(batch && batch.trim()));
 }
 
 export async function getNoDuesById(id: string, tenantId: string) {

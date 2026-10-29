@@ -8,7 +8,9 @@ import type {
   ApiGeneratedCircular,
   ApiTemplateDetail,
   PaginatedTemplates,
+  PaginatedGeneratedCirculars,
   TemplateQueryParams,
+  GeneratedCircularQueryParams,
   CreateTemplateInput,
   UpdateTemplateInput,
   GenerateCircularInput,
@@ -62,7 +64,7 @@ function throwIfError<T>(res: { data: T; error: string | null; status: number },
   return res.data;
 }
 
-function toQueryString(params: TemplateQueryParams): string {
+function toQueryString(params: TemplateQueryParams | GeneratedCircularQueryParams): string {
   const searchParams = new URLSearchParams();
 
   for (const [key, value] of Object.entries(params)) {
@@ -119,6 +121,19 @@ const circularApi = {
     return throwIfError(res).circulars;
   },
 
+  getGeneratedCircularsPaginated: async (
+    params: GeneratedCircularQueryParams = {}
+  ): Promise<PaginatedGeneratedCirculars> => {
+    const res = await apiClient.get<{ data: ApiGeneratedCircular[]; pagination: RawPaginationMeta }>(
+      `/circulars/generated/paginated${toQueryString(params)}`
+    );
+    const payload = throwIfError(res);
+    return {
+      data: payload.data,
+      pagination: normalizePagination(payload.pagination),
+    };
+  },
+
   getMyCirculars: async (): Promise<ApiGeneratedCircular[]> => {
     const res = await apiClient.get<{ circulars: ApiGeneratedCircular[] }>('/circulars/generated/my');
     return throwIfError(res).circulars;
@@ -127,6 +142,11 @@ const circularApi = {
   generateCircular: async (data: GenerateCircularInput): Promise<ApiGeneratedCircular> => {
     const res = await apiClient.post<ApiGeneratedCircular>('/circulars/generate', data);
     return throwIfError(res, 201);
+  },
+
+  deleteGeneratedCircular: async (circularId: string): Promise<{ id: string }> => {
+    const res = await apiClient.delete<{ id: string }>(`/circulars/generated/${circularId}`);
+    return throwIfError(res);
   },
 };
 

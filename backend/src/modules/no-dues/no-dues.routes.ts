@@ -15,13 +15,16 @@ import {
 
 const router = Router();
 
-router.get('/my', requireRole('student'), requireStudentProfileAccess, ctrl.getMyNoDues);
-router.get('/eligibility/my', requireRole('student'), requireStudentProfileAccess, ctrl.getMyNoDuesEligibility);
-router.post('/proof', requireRole('student'), requireStudentProfileAccess, noDuesProofUpload.single('file'), ctrl.uploadNoDuesProof);
-router.post('/', requireRole('student'), requireStudentProfileAccess, validate(createNoDuesSchema), ctrl.createNoDues);
-router.put('/:id/resubmit', requireRole('student'), requireStudentProfileAccess, validate(updateNoDuesSchema), ctrl.resubmitNoDues);
+// Student routes — gated by the no_dues permission matrix so a Super Admin can revoke
+// a student's View/Create from the Roles tab and have it enforced here.
+router.get('/my', requireRole('student'), requirePermission('no_dues', 'view'), requireStudentProfileAccess, ctrl.getMyNoDues);
+router.get('/eligibility/my', requireRole('student'), requirePermission('no_dues', 'view'), requireStudentProfileAccess, ctrl.getMyNoDuesEligibility);
+router.post('/proof', requireRole('student'), requirePermission('no_dues', 'create'), requireStudentProfileAccess, noDuesProofUpload.single('file'), ctrl.uploadNoDuesProof);
+router.post('/', requireRole('student'), requirePermission('no_dues', 'create'), requireStudentProfileAccess, validate(createNoDuesSchema), ctrl.createNoDues);
+router.put('/:id/resubmit', requireRole('student'), requirePermission('no_dues', 'create'), requireStudentProfileAccess, validate(updateNoDuesSchema), ctrl.resubmitNoDues);
 
 router.get('/', requireRole('tpo_admin', 'tpo_employee'), requirePermission('no_dues', 'view'), validate(queryNoDuesSchema, 'query'), ctrl.getNoDuesRequests);
+router.get('/passing-years', requireRole('tpo_admin', 'tpo_employee'), requirePermission('no_dues', 'view'), ctrl.getPassingYears);
 router.post('/eligibility/import', requireRole('tpo_admin', 'tpo_employee'), requirePermission('no_dues', 'edit'), spreadsheetUpload.single('file'), ctrl.importNoDuesEligibility);
 router.post('/eligibility/enable', requireRole('tpo_admin', 'tpo_employee'), requirePermission('no_dues', 'edit'), validate(enableNoDuesEligibilitySchema), ctrl.enableNoDuesEligibility);
 router.get('/:id', requireRole('tpo_admin', 'tpo_employee'), requirePermission('no_dues', 'view'), ctrl.getNoDuesById);

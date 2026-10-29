@@ -37,11 +37,80 @@ function normalizeNocProgramValue(value: string) {
   return value.trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
+// A given NOC (reference number) may be re-issued at most this many times.
+const NOC_REISSUE_LIMIT = 4;
+
+// ── Recruiter fallback for University-Placement-Drive NOCs ───────────────────
+// University-drive (offer-sourced) NOCs don't collect contact_person_* (the wizard only prefills
+// company + role from the chosen offer). The offer isn't persisted on the NOC, so the only durable
+// link back to a recruiter is NocRequest.company_id → Company.recruiters[]. These helpers recover
+// the recruiter's name/phone/designation/email so the record views, the report, and the issued
+// certificate all show recruiter details.
+type RecruiterContactFields = {
+  name: string | null;
+  phone: string | null;
+  designation: string | null;
+  email: string | null;
+};
+
+type CompanyRecruiterLite = {
+  name: string | null;
+  phone: string | null;
+  designation: string | null;
+  email: string | null;
+  verification_status?: VerificationStatus;
+};
+
+/** Prefer a verified recruiter, else the earliest-created (caller orders by created_at asc). */
+export function pickCompanyRecruiter(recruiters?: CompanyRecruiterLite[] | null): RecruiterContactFields | null {
+  if (!recruiters || recruiters.length === 0) return null;
+  const chosen = recruiters.find((r) => r.verification_status === VerificationStatus.verified) ?? recruiters[0];
+  return {
+    name: chosen.name ?? null,
+    phone: chosen.phone ?? null,
+    designation: chosen.designation ?? null,
+    email: chosen.email ?? null,
+  };
+}
+
+/** Fill the four contact_person_* fields from the linked company's recruiter when the NOC's own are empty. */
+export function contactWithRecruiterFallback<
+  T extends {
+    contact_person_name: string | null;
+    contact_person_phone: string | null;
+    contact_person_designation: string | null;
+    contact_person_email: string | null;
+    company?: { recruiters?: CompanyRecruiterLite[] | null } | null;
+  }
+>(noc: T): T {
+  const recruiter = pickCompanyRecruiter(noc.company?.recruiters);
+  if (!recruiter) return noc;
+  return {
+    ...noc,
+    contact_person_name: noc.contact_person_name || recruiter.name,
+    contact_person_phone: noc.contact_person_phone || recruiter.phone,
+    contact_person_designation: noc.contact_person_designation || recruiter.designation,
+    contact_person_email: noc.contact_person_email || recruiter.email,
+  };
+}
+
+const NOC_COMPANY_RECRUITER_SELECT = {
+  id: true,
+  name: true,
+  source: true,
+  verification_status: true,
+  recruiters: {
+    select: { name: true, phone: true, designation: true, email: true, verification_status: true },
+    orderBy: { created_at: 'asc' as const },
+  },
+} as const;
+
 const NOC_STUDENT_SELECT = {
   id: true,
   full_name: true,
   enrollment_number: true,
   department: true,
+  branch: true,
   batch: true,
   current_semester: true,
   course: true,
@@ -55,6 +124,7 @@ type NocCertificateStudent = {
   full_name: string;
   enrollment_number: string;
   department: string;
+  branch: string | null;
   batch: string | null;
   current_semester: string | null;
   course: string | null;
@@ -97,6 +167,8 @@ type NocCertificateSnapshot = {
 type NocCertificateSource = {
   tenant_id: string;
   program: string;
+  // Set for a re-issue — the certificate reuses this shared reference number instead of a new sequence.
+  noc_number?: string | null;
   contact_person_name: string | null;
   contact_person_designation: string | null;
   student: NocCertificateStudent;
@@ -145,7 +217,7 @@ function buildNocCertificateSnapshot(args: {
     contact_person_name: args.noc.contact_person_name || '—',
     student_name: args.noc.student.full_name,
     enrollment_number: args.noc.student.enrollment_number,
-    branch: args.noc.student.department,
+    branch: args.noc.student.branch ?? args.noc.student.department,
     semester: args.noc.student.current_semester ? String(args.noc.student.current_semester) : '—',
     program_label: args.programLabel,
     company_name: args.noc.company_name,
@@ -176,7 +248,7 @@ function buildNocCertificateSnapshot(args: {
 async function generateNocCertificateArtifact(noc: NocCertificateSource): Promise<NocCertificateArtifact> {
   await ensureTenantNocTemplatesSeeded(noc.tenant_id);
 
-  const templateResult = await getTemplateForProgram(noc.tenant_id, noc.program, noc.student.department);
+  const templateResult = await getTemplateForProgram(noc.tenant_id, noc.program, [noc.student.branch, noc.student.department]);
   const programLabel = templateResult?.postingType.value
     ? formatNocPostingTypeLabel(templateResult.postingType.value)
     : formatNocPostingTypeLabel(noc.program);
@@ -193,16 +265,31 @@ async function generateNocCertificateArtifact(noc: NocCertificateSource): Promis
   let certificateFilePath = '';
   const postingTypeValue = templateResult?.postingType.value ?? noc.program;
 
-  const count = await prisma.nocRequest.count({
-    where: {
-      tenant_id: noc.tenant_id,
-      noc_number: {
-        startsWith: `SOU/TPO/${String(issueDate.getMonth() + 1).padStart(2, '0')}-${issueDate.getFullYear()}/`,
-      },
-    },
-  });
-
-  referenceNumber = buildNocReferenceNumber(issueDate, postingTypeValue, count + 1);
+  if (noc.noc_number) {
+    // Re-issue: keep the shared reference number of the superseded NOC (do not mint a new sequence).
+    referenceNumber = noc.noc_number;
+  } else {
+    // New NOC: next per-tenant per-month sequence. Count DISTINCT numbers (re-issues share a number, so
+    // counting rows would inflate the sequence) and step past any existing number — noc_number is no
+    // longer @unique, so we can't rely on a P2002 retry to guarantee uniqueness.
+    const monthPrefix = `SOU/TPO/${String(issueDate.getMonth() + 1).padStart(2, '0')}-${issueDate.getFullYear()}/`;
+    const existingThisMonth = await prisma.nocRequest.findMany({
+      where: { tenant_id: noc.tenant_id, noc_number: { startsWith: monthPrefix } },
+      distinct: ['noc_number'],
+      select: { noc_number: true },
+    });
+    let sequence = existingThisMonth.length + 1;
+    referenceNumber = buildNocReferenceNumber(issueDate, postingTypeValue, sequence);
+    while (
+      await prisma.nocRequest.findFirst({
+        where: { tenant_id: noc.tenant_id, noc_number: referenceNumber },
+        select: { id: true },
+      })
+    ) {
+      sequence += 1;
+      referenceNumber = buildNocReferenceNumber(issueDate, postingTypeValue, sequence);
+    }
+  }
   certificateUrl = `/uploads/noc-certificates/${referenceNumber.replace(/[^a-zA-Z0-9._-]+/g, '_')}.pdf`;
   certificateFilePath = path.resolve(env.uploadDir, certificateUrl.replace('/uploads/', ''));
 
@@ -218,6 +305,7 @@ async function generateNocCertificateArtifact(noc: NocCertificateSource): Promis
       full_name: noc.student.full_name,
       enrollment_number: noc.student.enrollment_number,
       department: noc.student.department,
+      branch: noc.student.branch ?? noc.student.department,
       batch: noc.student.batch ?? '',
       current_semester: noc.student.current_semester ?? '',
       course: noc.student.course ?? '',
@@ -269,9 +357,10 @@ export async function getMyNocs(userId: string) {
     where: { student_id: student.id },
     orderBy: { created_at: 'desc' },
     include: {
-      company: { select: { id: true, name: true, source: true, verification_status: true } },
+      company: { select: NOC_COMPANY_RECRUITER_SELECT },
       faculty_approved_by_user: { select: { id: true, name: true } },
       tpo_approved_by_user: { select: { id: true, name: true } },
+      previous_noc: { select: { noc_number: true } },
     },
   });
 
@@ -311,7 +400,7 @@ export async function getMyNocs(userId: string) {
     logger.error({ err }, 'Completion-due notification failed');
   }
 
-  return nocs;
+  return nocs.map(contactWithRecruiterFallback);
 }
 
 // ── Internship completion certificate ────────────────────────────────────────
@@ -538,10 +627,24 @@ export async function rejectCompletionCertificate(
 // Student-safe option source for the NOC create form: existing companies (Name select),
 // plus previously-used cities and designations (datalist autocomplete). Read-only, tenant-scoped.
 export async function getNocFieldSuggestions(tenantId: string) {
-  const [companies, cityRows, designationRows] = await Promise.all([
+  const [companyRows, cityRows, designationRows] = await Promise.all([
     prisma.company.findMany({
       where: { tenant_id: tenantId },
-      select: { id: true, name: true },
+      // Enriched so the student NOC form can auto-populate an existing company's details on select
+      // (address/city/state/pan/gst + one picked recruiter's contact). Company has no pincode column.
+      select: {
+        id: true,
+        name: true,
+        address: true,
+        city: true,
+        state: true,
+        pan: true,
+        gst: true,
+        recruiters: {
+          select: { name: true, phone: true, designation: true, email: true, verification_status: true },
+          orderBy: { created_at: 'asc' },
+        },
+      },
       orderBy: { name: 'asc' },
       take: 500,
     }),
@@ -558,6 +661,19 @@ export async function getNocFieldSuggestions(tenantId: string) {
       take: 200,
     }),
   ]);
+
+  // Attach a single representative recruiter per company (verified-else-earliest, same helper the NOC
+  // create flow uses) and drop the raw recruiters array so the payload stays bounded.
+  const companies = companyRows.map((company) => ({
+    id: company.id,
+    name: company.name,
+    address: company.address ?? null,
+    city: company.city ?? null,
+    state: company.state ?? null,
+    pan: company.pan ?? null,
+    gst: company.gst ?? null,
+    recruiter: pickCompanyRecruiter(company.recruiters),
+  }));
 
   const cities = cityRows
     .map((r) => r.company_city)
@@ -591,10 +707,11 @@ export async function getNocs(
   user: Express.AuthUser,
   scope?: Express.ScopeFilters
 ) {
-  const { page, limit, status, noc_type, completion_status, sort_by, sort_order, posting_type, institute, course, branch, academic_year, date_from, date_to } = filters;
+  const { page, limit, status, statuses, search, noc_type, completion_status, sort_by, sort_order, posting_type, institute, course, branch, academic_year, date_from, date_to } = filters;
   const where: Record<string, unknown> = { tenant_id: tenantId };
 
-  if (status) where.status = status;
+  if (statuses?.length) where.status = { in: statuses };
+  else if (status) where.status = status;
   if (noc_type) where.noc_type = noc_type;
   // Completion-certificate review tab: filter by the submitted completion status.
   if (completion_status) where.completion_status = completion_status;
@@ -604,9 +721,26 @@ export async function getNocs(
   if (nocScope.length > 0) where.student = { is: { AND: nocScope } };
   const nocDateRange = buildDateRangeCondition(date_from, date_to);
   if (nocDateRange) where.created_at = nocDateRange;
+  // Free-text search — scalar NOC columns + student/company relations. Nested-relation clauses live in
+  // `where.OR`, so they don't collide with the top-level `where.student` scope filter (they AND).
+  if (search) {
+    where.OR = [
+      { company_name: { contains: search, mode: 'insensitive' } },
+      { role_title: { contains: search, mode: 'insensitive' } },
+      { program: { contains: search, mode: 'insensitive' } },
+      { noc_number: { contains: search, mode: 'insensitive' } },
+      { student: { is: { full_name: { contains: search, mode: 'insensitive' } } } },
+      { student: { is: { enrollment_number: { contains: search, mode: 'insensitive' } } } },
+      { company: { is: { name: { contains: search, mode: 'insensitive' } } } },
+    ];
+  }
 
   const orderBy = getNocOrderBy(sort_by, sort_order);
-  const include = { student: { select: NOC_STUDENT_SELECT } } as const;
+  const include = {
+    student: { select: NOC_STUDENT_SELECT },
+    company: { select: NOC_COMPANY_RECRUITER_SELECT },
+    previous_noc: { select: { noc_number: true } },
+  } as const;
 
   // Faculty coordinators are scoped to their assigned students (institute/course/branch,
   // tolerant match). Filter in-memory then paginate so a department/course mismatch can't
@@ -619,7 +753,10 @@ export async function getNocs(
     const all = await prisma.nocRequest.findMany({ where, orderBy, include });
     const scoped = all.filter((noc) => studentMatchesFacultyScope(noc.student, facultyScope));
     const start = (page - 1) * limit;
-    return { data: scoped.slice(start, start + limit), pagination: paginate(page, limit, scoped.length) };
+    return {
+      data: scoped.slice(start, start + limit).map(contactWithRecruiterFallback),
+      pagination: paginate(page, limit, scoped.length),
+    };
   }
 
   const [nocs, total] = await Promise.all([
@@ -627,7 +764,58 @@ export async function getNocs(
     prisma.nocRequest.count({ where }),
   ]);
 
-  return { data: nocs, pagination: paginate(page, limit, total) };
+  return { data: nocs.map(contactWithRecruiterFallback), pagination: paginate(page, limit, total) };
+}
+
+export interface FacultyNocSummary {
+  pending_faculty: number;
+  approved_forwarded: number;
+  approved_by_tpo: number;
+  rejected_by_dept: number;
+  rejected_by_tpo: number;
+  total: number;
+}
+
+/**
+ * Department-wide NOC counts for the faculty coordinator's dashboard stat cards. The rejected-by-dept vs
+ * rejected-by-tpo split needs `faculty_approved_at`, which the list query can't express, so this is a
+ * dedicated aggregate (loads only status + faculty_approved_at + scope fields, filtered by faculty scope).
+ */
+export async function getFacultyNocSummary(
+  tenantId: string,
+  user: Express.AuthUser
+): Promise<FacultyNocSummary> {
+  const empty: FacultyNocSummary = {
+    pending_faculty: 0,
+    approved_forwarded: 0,
+    approved_by_tpo: 0,
+    rejected_by_dept: 0,
+    rejected_by_tpo: 0,
+    total: 0,
+  };
+  if (user.role !== 'faculty_coordinator') return empty;
+  const facultyScope = resolveFacultyScope(user);
+  if (!facultyScope.hasScope) return empty;
+
+  const rows = await prisma.nocRequest.findMany({
+    where: { tenant_id: tenantId },
+    select: {
+      status: true,
+      faculty_approved_at: true,
+      student: { select: { department: true, branch: true, course: true, institute: true } },
+    },
+  });
+  const scoped = rows.filter((noc) => studentMatchesFacultyScope(noc.student, facultyScope));
+
+  const summary: FacultyNocSummary = { ...empty, total: scoped.length };
+  for (const noc of scoped) {
+    if (noc.status === 'pending_faculty') summary.pending_faculty += 1;
+    if (noc.status === 'pending_tpo' || noc.status === 'approved' || noc.status === 'issued') summary.approved_forwarded += 1;
+    if (noc.status === 'approved' || noc.status === 'issued') summary.approved_by_tpo += 1;
+    if (noc.status === 'rejected' && !noc.faculty_approved_at) summary.rejected_by_dept += 1;
+    if (noc.status === 'rejected' && noc.faculty_approved_at) summary.rejected_by_tpo += 1;
+  }
+  return summary;
 }
 
 export async function getNocById(
@@ -642,9 +830,10 @@ export async function getNocById(
     },
     include: {
       student: { select: NOC_STUDENT_SELECT },
-      company: { select: { id: true, name: true, source: true, verification_status: true } },
+      company: { select: NOC_COMPANY_RECRUITER_SELECT },
       faculty_approved_by_user: { select: { id: true, name: true } },
       tpo_approved_by_user: { select: { id: true, name: true } },
+      previous_noc: { select: { noc_number: true } },
     },
   });
 
@@ -657,45 +846,81 @@ export async function getNocById(
     }
   }
 
-  return noc;
+  return contactWithRecruiterFallback(noc);
 }
 
 export async function createNoc(userId: string, tenantId: string, data: CreateNocInput) {
   const student = await prisma.student.findUnique({ where: { user_id: userId } });
   if (!student) throw new NotFoundError('Student profile');
 
-  const normalizedProgram = normalizeNocProgramValue(data.program);
-  const postingType = await prisma.masterOption.findFirst({
-    where: {
-      tenant_id: tenantId,
-      category: 'posting_type',
-      normalized_value: normalizedProgram,
-      is_active: true,
-    },
-    select: { value: true },
-  });
-  const legacyProgram = LEGACY_NOC_PROGRAMS.get(normalizedProgram);
-  const resolvedProgram = postingType?.value ?? legacyProgram;
+  // Re-issue: the new record supersedes an already-issued NOC (student changed companies). It shares the
+  // previous NOC's reference number, becomes the Active record, and pushes the prior versions to Inactive.
+  // The re-issued NOC MUST be generated under the SAME posting type as the previous NOC — so `program` is
+  // inherited from the previous NOC (identified by its number), NOT from the student's submitted `data.program`.
+  let resolvedProgram: string;
+  let reissueGroupNumber: string | null = null;
+  if (data.is_reissue) {
+    const previous = await prisma.nocRequest.findFirst({
+      where: { id: data.previous_noc_id ?? '', tenant_id: tenantId, student_id: student.id },
+      select: { id: true, status: true, noc_number: true, program: true },
+    });
+    if (!previous || previous.status !== 'issued' || !previous.noc_number) {
+      throw new BusinessRuleError(
+        'Select a valid issued NOC to re-issue.',
+        'INVALID_REISSUE_TARGET'
+      );
+    }
+    // Force the re-issue onto the previous NOC's posting type (ignore any submitted data.program).
+    resolvedProgram = previous.program;
+    reissueGroupNumber = previous.noc_number;
 
-  if (!resolvedProgram) {
-    throw new BusinessRuleError('Please select a valid posting type from masters', 'INVALID_NOC_PROGRAM');
-  }
+    // Limit: at most 4 re-issues per NOC number.
+    const reissueCount = await prisma.nocRequest.count({
+      where: { tenant_id: tenantId, noc_number: reissueGroupNumber, is_reissue: true },
+    });
+    if (reissueCount >= NOC_REISSUE_LIMIT) {
+      throw new BusinessRuleError(
+        `This NOC has already been re-issued the maximum of ${NOC_REISSUE_LIMIT} times.`,
+        'NOC_REISSUE_LIMIT_REACHED'
+      );
+    }
+  } else {
+    const normalizedProgram = normalizeNocProgramValue(data.program);
+    const postingType = await prisma.masterOption.findFirst({
+      where: {
+        tenant_id: tenantId,
+        category: 'posting_type',
+        normalized_value: normalizedProgram,
+        is_active: true,
+      },
+      select: { value: true },
+    });
+    const legacyProgram = LEGACY_NOC_PROGRAMS.get(normalizedProgram);
+    const derivedProgram = postingType?.value ?? legacyProgram;
 
-  const alreadyIssued = await prisma.nocRequest.findFirst({
-    where: {
-      tenant_id: tenantId,
-      student_id: student.id,
-      program: resolvedProgram,
-      status: 'issued',
-    },
-    select: { id: true },
-  });
+    if (!derivedProgram) {
+      throw new BusinessRuleError('Please select a valid posting type from masters', 'INVALID_NOC_PROGRAM');
+    }
+    resolvedProgram = derivedProgram;
 
-  if (alreadyIssued) {
-    throw new BusinessRuleError(
-      'An NOC has already been issued for this posting type.',
-      'NOC_ALREADY_ISSUED'
-    );
+    // A normal NOC cannot duplicate an already-issued one for the same posting type (a re-issue is the path
+    // for that).
+    const alreadyIssued = await prisma.nocRequest.findFirst({
+      where: {
+        tenant_id: tenantId,
+        student_id: student.id,
+        program: resolvedProgram,
+        status: 'issued',
+      },
+      select: { id: true },
+    });
+
+    if (alreadyIssued) {
+      throw new BusinessRuleError(
+        'An NOC has already been issued for this posting type.',
+        'NOC_ALREADY_ISSUED'
+      );
+    }
   }
 
   // Find-or-create a real Company record so a student-sourced employer becomes a
@@ -748,46 +973,87 @@ export async function createNoc(userId: string, tenantId: string, data: CreateNo
       ? CompanyVerificationStatus.verified
       : CompanyVerificationStatus.pending;
 
-  const created = await prisma.nocRequest.create({
-    data: {
-      tenant_id: tenantId,
-      student_id: student.id,
-      noc_type: data.noc_type as NocType,
-      internship_type: data.internship_type ?? null,
-      program: resolvedProgram,
-      placement_source: data.placement_source as PlacementSource,
-      drive_id: data.drive_id,
-      company_id: companyId,
-      company_name: data.company_name,
-      company_address: data.company_address,
-      company_city: data.company_city,
-      company_state: data.company_state,
-      company_pincode: data.company_pincode,
-      company_pan: data.company_pan,
-      company_gst: data.company_gst,
-      supporting_document_url: data.supporting_document_url,
-      supporting_document_name: data.supporting_document_name,
-      company_verification_status: companyVerificationStatus,
-      contact_person_name: data.contact_person_name,
-      contact_person_designation: data.contact_person_designation,
-      contact_person_phone: data.contact_person_phone,
-      contact_person_email: data.contact_person_email,
-      reference_by: data.reference_by,
-      reference_details: data.reference_details,
-      role_title: data.role_title,
-      technology_domain: data.technology_domain,
-      job_description: data.job_description,
-      stipend_amount: data.stipend_amount,
-      start_date: data.start_date,
-      end_date: data.end_date,
-      duration_weeks: data.duration_weeks,
-      offer_letter_url: data.offer_letter_url,
-    },
-    include: {
-      faculty_approved_by_user: { select: { id: true, name: true } },
-      tpo_approved_by_user: { select: { id: true, name: true } },
-    },
-  });
+  // University-drive NOCs don't collect a contact person (only company + role are prefilled from the
+  // offer). Recover the recruiter from the resolved company so the record, report, and issued
+  // certificate carry recruiter details. Fill-empty only — never overwrite a student-entered value.
+  let recruiterContact: RecruiterContactFields | null = null;
+  const needsRecruiterContact =
+    !data.contact_person_name ||
+    !data.contact_person_phone ||
+    !data.contact_person_designation ||
+    !data.contact_person_email;
+  if (needsRecruiterContact) {
+    const companyRecruiters = await prisma.recruiter
+      .findMany({
+        where: { tenant_id: tenantId, company_id: companyId },
+        orderBy: { created_at: 'asc' },
+        select: { name: true, phone: true, designation: true, email: true, verification_status: true },
+      })
+      .catch((err) => {
+        logger.error({ err }, 'NOC recruiter fallback lookup failed');
+        return [] as CompanyRecruiterLite[];
+      });
+    recruiterContact = pickCompanyRecruiter(companyRecruiters);
+  }
+
+  const nocData = {
+    tenant_id: tenantId,
+    student_id: student.id,
+    noc_type: data.noc_type as NocType,
+    internship_type: data.internship_type ?? null,
+    program: resolvedProgram,
+    placement_source: data.placement_source as PlacementSource,
+    drive_id: data.drive_id,
+    company_id: companyId,
+    company_name: data.company_name,
+    company_address: data.company_address,
+    company_city: data.company_city,
+    company_state: data.company_state,
+    company_pincode: data.company_pincode,
+    company_pan: data.company_pan,
+    company_gst: data.company_gst,
+    supporting_document_url: data.supporting_document_url,
+    supporting_document_name: data.supporting_document_name,
+    company_verification_status: companyVerificationStatus,
+    contact_person_name: data.contact_person_name || recruiterContact?.name || null,
+    contact_person_designation: data.contact_person_designation || recruiterContact?.designation || null,
+    contact_person_phone: data.contact_person_phone || recruiterContact?.phone || null,
+    contact_person_email: data.contact_person_email || recruiterContact?.email || null,
+    reference_by: data.reference_by,
+    reference_details: data.reference_details,
+    role_title: data.role_title,
+    technology_domain: data.technology_domain,
+    job_description: data.job_description,
+    stipend_amount: data.stipend_amount,
+    start_date: data.start_date,
+    end_date: data.end_date,
+    duration_weeks: data.duration_weeks,
+    offer_letter_url: data.offer_letter_url,
+    // Re-issue: share the previous NOC's number and become the active record. A fresh NOC leaves
+    // noc_number null (assigned at issue) and is active by default.
+    is_reissue: data.is_reissue,
+    previous_noc_id: data.is_reissue ? data.previous_noc_id : null,
+    reason_for_company_change: data.is_reissue ? data.reason_for_company_change ?? null : null,
+    termination_letter_url: data.is_reissue ? data.termination_letter_url ?? null : null,
+    termination_letter_name: data.is_reissue ? data.termination_letter_name ?? null : null,
+    noc_number: reissueGroupNumber,
+    is_active: true,
+  };
+  const includeApprovers = {
+    faculty_approved_by_user: { select: { id: true, name: true } },
+    tpo_approved_by_user: { select: { id: true, name: true } },
+  } as const;
+
+  const created = reissueGroupNumber
+    ? await prisma.$transaction(async (tx) => {
+        // Supersede every prior record sharing this number, then create the new active version.
+        await tx.nocRequest.updateMany({
+          where: { tenant_id: tenantId, noc_number: reissueGroupNumber },
+          data: { is_active: false },
+        });
+        return tx.nocRequest.create({ data: nocData, include: includeApprovers });
+      })
+    : await prisma.nocRequest.create({ data: nocData, include: includeApprovers });
 
   try {
     const facultyCandidates = await prisma.user.findMany({
@@ -801,7 +1067,7 @@ export async function createNoc(userId: string, tenantId: string, data: CreateNo
     // Notify only faculty whose assignment scope covers this student (institute/course/branch).
     const facultyUsers = facultyCandidates.filter((faculty) =>
       studentMatchesFacultyScope(
-        { department: student.department, course: student.course, institute: student.institute },
+        { department: student.department, branch: student.branch, course: student.course, institute: student.institute },
         resolveFacultyScope(faculty),
       ),
     );
@@ -832,7 +1098,7 @@ export async function facultyApprove(
 ) {
   const noc = await prisma.nocRequest.findUnique({
     where: { id: nocId },
-    include: { student: { select: { department: true, course: true, institute: true } } },
+    include: { student: { select: { department: true, branch: true, course: true, institute: true } } },
   });
   if (!noc) throw new NotFoundError('NOC Request');
 
@@ -951,6 +1217,7 @@ export async function tpoApprove(nocId: string, data: ApproveNocInput, userId: s
           full_name: true,
           enrollment_number: true,
           department: true,
+          branch: true,
           batch: true,
           current_semester: true,
           course: true,
@@ -966,6 +1233,7 @@ export async function tpoApprove(nocId: string, data: ApproveNocInput, userId: s
     const artifact = await generateNocCertificateArtifact({
       tenant_id: nocForCertificate.tenant_id,
       program: nocForCertificate.program,
+      noc_number: nocForCertificate.noc_number,
       contact_person_name: nocForCertificate.contact_person_name,
       contact_person_designation: nocForCertificate.contact_person_designation,
       student: nocForCertificate.student,
@@ -1054,7 +1322,7 @@ export async function rejectNoc(
 ) {
   const noc = await prisma.nocRequest.findUnique({
     where: { id: nocId },
-    include: { student: { select: { department: true, course: true, institute: true } } },
+    include: { student: { select: { department: true, branch: true, course: true, institute: true } } },
   });
   if (!noc) throw new NotFoundError('NOC Request');
 
@@ -1069,14 +1337,43 @@ export async function rejectNoc(
     throw new BusinessRuleError('NOC cannot be rejected at this stage', 'INVALID_NOC_STATUS');
   }
 
-  const updated = await prisma.nocRequest.update({
-    where: { id: nocId },
-    data: {
-      status: 'rejected' as NocStatus,
-      rejected_at: new Date(),
-      rejection_reason: data.rejection_reason,
-    },
-  });
+  // Rejecting an active re-issue must return the previously superseded (valid) NOC to Active, so the
+  // student never loses their standing NOC because a re-issue attempt failed.
+  const revertPrevious = noc.is_reissue && noc.is_active && !!noc.noc_number;
+  const updated = revertPrevious
+    ? await prisma.$transaction(async (tx) => {
+        const rejected = await tx.nocRequest.update({
+          where: { id: nocId },
+          data: {
+            status: 'rejected' as NocStatus,
+            rejected_at: new Date(),
+            rejection_reason: data.rejection_reason,
+            is_active: false,
+          },
+        });
+        const previousActive = await tx.nocRequest.findFirst({
+          where: {
+            tenant_id: noc.tenant_id,
+            noc_number: noc.noc_number,
+            id: { not: nocId },
+            status: { not: 'rejected' as NocStatus },
+          },
+          orderBy: { created_at: 'desc' },
+          select: { id: true },
+        });
+        if (previousActive) {
+          await tx.nocRequest.update({ where: { id: previousActive.id }, data: { is_active: true } });
+        }
+        return rejected;
+      })
+    : await prisma.nocRequest.update({
+        where: { id: nocId },
+        data: {
+          status: 'rejected' as NocStatus,
+          rejected_at: new Date(),
+          rejection_reason: data.rejection_reason,
+        },
+      });
 
   try {
     const studentUser = await prisma.student.findUnique({
@@ -1112,6 +1409,7 @@ export async function issueNoc(nocId: string, userId: string) {
           full_name: true,
           enrollment_number: true,
           department: true,
+          branch: true,
           batch: true,
           current_semester: true,
           course: true,
@@ -1129,12 +1427,14 @@ export async function issueNoc(nocId: string, userId: string) {
     const artifact = await generateNocCertificateArtifact({
       tenant_id: noc.tenant_id,
       program: noc.program,
+      noc_number: noc.noc_number,
       contact_person_name: noc.contact_person_name,
       contact_person_designation: noc.contact_person_designation,
       student: {
         full_name: noc.student.full_name,
         enrollment_number: noc.student.enrollment_number,
         department: noc.student.department,
+        branch: noc.student.branch ?? noc.student.department,
         batch: noc.student.batch,
         current_semester: noc.student.current_semester,
         course: noc.student.course,

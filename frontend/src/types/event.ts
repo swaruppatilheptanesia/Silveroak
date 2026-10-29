@@ -171,6 +171,7 @@ export interface ApiEventStudentAssignment {
     full_name: string;
     enrollment_number: string;
     department: string;
+    branch?: string | null;
   };
 }
 
@@ -231,6 +232,9 @@ export interface AssignStudentsResult {
 
 export interface EventQueryParams {
   status?: ApiEventStatus;
+  /** Multi-status filter (Upcoming/Past tab → its own paginated query). Serialized as CSV. */
+  statuses?: ApiEventStatus[];
+  search?: string;
   type?: ApiEventType;
   posting_type?: 'job' | 'internship' | 'stipend_internship';
   posting_type_master_id?: string;

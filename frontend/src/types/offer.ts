@@ -18,6 +18,7 @@ export interface Offer {
   student_name: string;
   enrollment_number: string;
   department: string;
+  branch?: string | null;
   batch: string;
   company_id: string;
   company_name: string;
@@ -192,7 +193,7 @@ export interface ApiOfferListItem {
   compliance_status: ComplianceStatus;
   applications_blocked: boolean;
   admin_override_enabled: boolean;
-  student: { id: string; full_name: string; enrollment_number: string; department: string; batch: string; institute?: string | null; course?: string | null; current_semester?: string | null };
+  student: { id: string; full_name: string; enrollment_number: string; department: string; branch?: string | null; batch: string; institute?: string | null; course?: string | null; current_semester?: string | null };
   company: { id: string; name: string };
   posting: { id: string; title: string; type: 'job' | 'internship' | 'stipend_internship' };
 }
@@ -226,7 +227,7 @@ export interface ApiOfferDetail {
   compliance_status: ComplianceStatus;
   applications_blocked: boolean;
   admin_override_enabled: boolean;
-  student: { id: string; full_name: string; enrollment_number: string; department: string; batch: string };
+  student: { id: string; full_name: string; enrollment_number: string; department: string; branch?: string | null; batch: string };
   company: { id: string; name: string };
   posting: { id: string; title: string; type: 'job' | 'internship' | 'stipend_internship' };
   audit_trail: ApiOfferAuditEntry[];

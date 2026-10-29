@@ -49,6 +49,7 @@ export interface PolicyQueryParams {
   global?: boolean;
   /** When set, restrict to policies linked to this posting type (student-readable). */
   posting_type_master_id?: string;
+  search?: string;
   page?: number;
   limit?: number;
   sort_by?: string;

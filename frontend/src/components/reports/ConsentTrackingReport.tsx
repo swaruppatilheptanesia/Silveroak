@@ -54,11 +54,11 @@ export default function ConsentTrackingReport() {
 
   const handleExport = () => {
     const rows = receipts.map((receipt: any) => (
-      `"${receipt.student_name}",${receipt.roll_number},${receipt.department},"${receipt.announcement_title}",${receipt.read_at ? formatDate(receipt.read_at) : 'Not read'},${receipt.consent_given ? 'Yes' : 'No'},${formatDate(receipt.consent_at)}`
+      `"${receipt.student_name}",${receipt.roll_number},${receipt.branch},"${receipt.announcement_title}",${receipt.read_at ? formatDate(receipt.read_at) : 'Not read'},${receipt.consent_given ? 'Yes' : 'No'},${formatDate(receipt.consent_at)}`
     ));
 
     downloadCSV(
-      `Student,Roll Number,Department,Announcement,Read At,Consented,Consent At\n${rows.join('\n')}`,
+      `Student,Roll Number,Branch,Announcement,Read At,Consented,Consent At\n${rows.join('\n')}`,
       'consent_tracking',
     );
   };
@@ -175,7 +175,7 @@ export default function ConsentTrackingReport() {
                 <TableRow>
                   <TableHead>Student</TableHead>
                   <TableHead>Roll No</TableHead>
-                  <TableHead>Department</TableHead>
+                  <TableHead>Branch</TableHead>
                   <TableHead>Announcement</TableHead>
                   <TableHead>Read</TableHead>
                   <TableHead>Consent</TableHead>
@@ -199,7 +199,7 @@ export default function ConsentTrackingReport() {
                     <TableRow key={`${receipt.announcement_id}-${receipt.student_id}-${index}`}>
                       <TableCell className="font-medium">{receipt.student_name}</TableCell>
                       <TableCell className="text-sm">{receipt.roll_number}</TableCell>
-                      <TableCell className="text-sm">{receipt.department}</TableCell>
+                      <TableCell className="text-sm">{receipt.branch}</TableCell>
                       <TableCell className="max-w-[240px] truncate text-sm">{receipt.announcement_title}</TableCell>
                       <TableCell>
                         {receipt.read_at ? (

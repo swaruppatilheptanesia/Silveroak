@@ -1,4 +1,4 @@
-import { useDeferredValue, useMemo, useState } from 'react';
+import { useDeferredValue, useEffect, useState } from 'react';
 import {
   Download,
   FileText,
@@ -13,6 +13,7 @@ import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { EmptyState } from '@/components/shared/EmptyState';
 import { PageLoader } from '@/components/shared/PageLoader';
 import { SearchInput } from '@/components/shared/SearchInput';
+import { ListPager } from '@/components/shared/ListPager';
 import {
   useCreatePolicy,
   useDeletePolicy,
@@ -22,7 +23,6 @@ import {
   useUploadPolicyDocument,
 } from '@/hooks/use-policy-api';
 import {
-  filterPoliciesBySearch,
   getPolicyCategoryMeta,
   getPolicyErrorMessage,
   hasPolicyRichTextContent,
@@ -118,9 +118,14 @@ export default function PolicyRepository() {
   const [deleteTarget, setDeleteTarget] = useState<ApiPolicyListItem | null>(null);
 
   const deferredSearch = useDeferredValue(search);
+  const [page, setPage] = useState(1);
+
+  useEffect(() => { setPage(1); }, [deferredSearch]);
 
   const policiesQuery = usePolicies({
-    limit: 100,
+    page,
+    limit: 20,
+    search: deferredSearch.trim() || undefined,
     sort_by: 'updated_at',
     sort_order: 'desc',
   });
@@ -131,10 +136,7 @@ export default function PolicyRepository() {
   const deletePolicy = useDeletePolicy();
 
   const policies = policiesQuery.data?.data ?? [];
-  const filteredPolicies = useMemo(
-    () => filterPoliciesBySearch(policies, deferredSearch),
-    [deferredSearch, policies]
-  );
+  const pagination = policiesQuery.data?.pagination;
 
   const selectedPolicy = detailQuery.data
     ?? policies.find((policy) => policy.id === selectedPolicyId)
@@ -235,7 +237,7 @@ export default function PolicyRepository() {
           </Button>
         </div>
 
-        {filteredPolicies.length === 0 ? (
+        {policies.length === 0 ? (
           <Card>
             <CardContent className="p-6">
               <EmptyState
@@ -248,7 +250,7 @@ export default function PolicyRepository() {
           </Card>
         ) : (
           <div className="grid gap-4 md:grid-cols-2">
-            {filteredPolicies.map((policy) => {
+            {policies.map((policy) => {
               const meta = getPolicyCategoryMeta(policy.category);
               const Icon = meta.icon;
 
@@ -286,6 +288,12 @@ export default function PolicyRepository() {
             })}
           </div>
         )}
+
+        <ListPager
+          page={pagination?.page ?? 1}
+          totalPages={pagination?.totalPages ?? 1}
+          onPageChange={setPage}
+        />
       </div>
 
       <Sheet

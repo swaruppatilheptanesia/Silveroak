@@ -29,8 +29,10 @@ export interface EventFormValues {
   dress_code: string;
   instructions: string;
   documents_required: string;
-  /** Faculty coordinator USER ids (multi-select of faculty accounts). */
+  /** Faculty coordinator USER ids (no longer edited in the form; preserved on edit). */
   faculty_coordinator_ids: string[];
+  /** Faculty coordinator display names (legacy mirror; preserved on edit, not editable). */
+  faculty_coordinators: string[];
   target_institutes: string[];
   target_courses: string[];
   target_branches: string[];
@@ -85,6 +87,7 @@ export function createEmptyEventFormValues(): EventFormValues {
     instructions: '',
     documents_required: '',
     faculty_coordinator_ids: [],
+    faculty_coordinators: [],
     target_institutes: [],
     target_courses: [],
     target_branches: [],
@@ -176,6 +179,7 @@ export function eventDetailToFormValues(
     instructions: event.instructions ?? '',
     documents_required: event.documents_required.join(', '),
     faculty_coordinator_ids: event.faculty_coordinator_ids ?? [],
+    faculty_coordinators: event.faculty_coordinators ?? [],
     target_institutes: event.target_institutes ?? [],
     target_courses: event.target_courses ?? [],
     target_branches: event.target_branches ?? [],

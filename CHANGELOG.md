@@ -6,6 +6,16 @@ area for easier scanning.
 
 ---
 
+## Filters & Reports
+
+### Academic Year now drives the Posting Type dropdown (Admin + Faculty)
+In every filter and report where an **Academic Year** and a **Posting Type** dropdown appear together (TPO
+Admin and Faculty), the two are now linked: Posting Type sits **right beside** Academic Year, its list shows
+only the posting types set up for the chosen year (types not tied to any year always appear), and it stays
+**disabled until a year is picked** — choose **All Years** to see every posting type. Selecting a year still
+filters the records exactly as before; this only changes which Posting Types you can choose. (The Interest
+Lists "Select program" picker is unchanged, since it drives the records directly.)
+
 ## UI cleanup
 
 ### Faculty portal cleanup + offer detail view
@@ -25,6 +35,14 @@ area for easier scanning.
 ---
 
 ## NOC
+
+### Fix: recruiter details now show for University-Placement-Drive NOCs
+NOCs raised via **Offer Source = University Placement Drive** were showing blank Recruiter Name / Contact /
+Email / Designation in the NOC record and in the Internship-NOC report, because that flow only captures the
+company and role (not a contact person). The recruiter details are now pulled from the drive company's
+recruiter — filled onto new NOCs when raised (so the record, report, and issued certificate all carry them)
+and shown as a live fallback for already-created NOCs. Self-sourced NOCs are unchanged; if a drive company
+has no recruiter on record, the fields stay blank.
 
 ### NOC certificate letter — updated recipient, student details, and letterhead
 Refreshed the NOC certificate (both the on-screen preview and the downloadable PDF, kept in sync): the

@@ -9,24 +9,23 @@ import { useComplianceReport } from '@/hooks/use-report-analytics-api';
 import { OFFER_STATUS_CONFIG } from '@/types/offer';
 import { ReportToolbar, downloadCSV, type DateRange } from './ReportToolbar';
 import PostingTypeFilter from './PostingTypeFilter';
-import { uniqueNonEmptyStrings } from './reportUtils';
 
 type QueryParams = {
-  department?: string;
+  branch?: string;
   posting_type?: string;
   search?: string;
 };
 
 export default function ComplianceReport() {
   const [dateRange, setDateRange] = useState<DateRange>({ from: undefined, to: undefined });
-  const [deptFilter, setDeptFilter] = useState('all');
+  const [branchFilter, setBranchFilter] = useState('all');
   const [complianceFilter, setComplianceFilter] = useState('all');
   const [postingTypeFilter, setPostingTypeFilter] = useState('all');
 
   const queryParams = useMemo<QueryParams>(() => ({
-    department: deptFilter === 'all' ? undefined : deptFilter,
+    branch: branchFilter === 'all' ? undefined : branchFilter,
     posting_type_master_id: postingTypeFilter === 'all' ? undefined : postingTypeFilter,
-  }), [deptFilter, postingTypeFilter]);
+  }), [branchFilter, postingTypeFilter]);
 
   const { data, isLoading } = useComplianceReport(queryParams);
 
@@ -35,7 +34,7 @@ export default function ComplianceReport() {
       id: offer.offer_id,
       student_name: offer.student_name,
       enrollment_number: offer.enrollment_number,
-      department: offer.department,
+      branch: offer.branch,
       company_name: offer.company_name,
       status: offer.status,
       applications_blocked: offer.applications_blocked,
@@ -46,11 +45,6 @@ export default function ComplianceReport() {
     }));
   }, [data]);
 
-  const departments = useMemo<string[]>(
-    () => uniqueNonEmptyStrings(offers.map((offer) => offer.department)),
-    [offers],
-  );
-
   const filtered = useMemo(() => {
     return offers.filter((offer) => {
       if (complianceFilter === 'blocked') return offer.applications_blocked;
@@ -60,12 +54,14 @@ export default function ComplianceReport() {
     });
   }, [complianceFilter, offers]);
 
+  const branches = useMemo(() => Array.from(new Set(offers.map((r: any) => r.branch).filter(Boolean))).sort() as string[], [offers]);
+
   const stats = data?.stats ?? { total: 0, compliant: 0, blocked: 0, overrides: 0, rate: 0 };
 
   const handleExport = () => {
-    const csv = `Student,Enrollment,Department,Company,Offer Status,Applications,Override,Override By,Override Date\n` +
+    const csv = `Student,Enrollment,Branch,Company,Offer Status,Applications,Override,Override By,Override Date\n` +
       filtered.map((offer) =>
-        `${offer.student_name},${offer.enrollment_number},${offer.department},${offer.company_name},${OFFER_STATUS_CONFIG[offer.status as keyof typeof OFFER_STATUS_CONFIG]?.label ?? offer.status},${offer.applications_blocked ? 'Blocked' : 'Active'},${offer.admin_override_enabled ? 'Yes' : 'No'},${offer.admin_override_by || '-'},${offer.admin_override_at ? format(new Date(offer.admin_override_at), 'dd MMM yyyy HH:mm') : '-'}`
+        `${offer.student_name},${offer.enrollment_number},${offer.branch},${offer.company_name},${OFFER_STATUS_CONFIG[offer.status as keyof typeof OFFER_STATUS_CONFIG]?.label ?? offer.status},${offer.applications_blocked ? 'Blocked' : 'Active'},${offer.admin_override_enabled ? 'Yes' : 'No'},${offer.admin_override_by || '-'},${offer.admin_override_at ? format(new Date(offer.admin_override_at), 'dd MMM yyyy HH:mm') : '-'}`
       ).join('\n');
     downloadCSV(csv, 'compliance_report');
   };
@@ -79,12 +75,14 @@ export default function ComplianceReport() {
             onValueChange={setPostingTypeFilter}
             triggerClassName="h-9 w-[180px] text-xs"
           />
-          <Select value={deptFilter} onValueChange={setDeptFilter}>
-            <SelectTrigger className="h-9 w-[160px] text-xs"><SelectValue placeholder="Department" /></SelectTrigger>
+          <Select value={branchFilter} onValueChange={setBranchFilter}>
+            <SelectTrigger className="w-full md:w-56">
+              <SelectValue placeholder="Branch" />
+            </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All Departments</SelectItem>
-              {departments.map((department) => (
-                <SelectItem key={department} value={department}>{department}</SelectItem>
+              <SelectItem value="all">All Branches</SelectItem>
+              {branches.map((branch) => (
+                <SelectItem key={branch} value={branch}>{branch}</SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -115,7 +113,7 @@ export default function ComplianceReport() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Student</TableHead>
-                  <TableHead>Department</TableHead>
+                  <TableHead>Branch</TableHead>
                   <TableHead>Company</TableHead>
                   <TableHead>Offer Status</TableHead>
                   <TableHead>Applications</TableHead>
@@ -132,7 +130,7 @@ export default function ComplianceReport() {
                 ) : filtered.map((offer) => (
                   <TableRow key={offer.id}>
                     <TableCell><div><p className="font-medium">{offer.student_name}</p><p className="text-xs text-muted-foreground">{offer.enrollment_number}</p></div></TableCell>
-                    <TableCell>{offer.department}</TableCell>
+                    <TableCell>{offer.branch}</TableCell>
                     <TableCell>{offer.company_name}</TableCell>
                     <TableCell><Badge className={OFFER_STATUS_CONFIG[offer.status as keyof typeof OFFER_STATUS_CONFIG]?.color ?? ''} variant="outline">{OFFER_STATUS_CONFIG[offer.status as keyof typeof OFFER_STATUS_CONFIG]?.label ?? offer.status}</Badge></TableCell>
                     <TableCell>

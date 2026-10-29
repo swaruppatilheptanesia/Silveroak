@@ -12,7 +12,7 @@ import { ReportToolbar, downloadCSV, type DateRange } from './ReportToolbar';
 type QueryParams = {
   from?: Date;
   to?: Date;
-  department?: string;
+  branch?: string;
   type?: string;
   status?: string;
   search?: string;
@@ -21,18 +21,18 @@ type QueryParams = {
 export default function PendingNOCReport() {
   const [dateRange, setDateRange] = useState<DateRange>({ from: undefined, to: undefined });
   const [searchQuery, setSearchQuery] = useState('');
-  const [deptFilter, setDeptFilter] = useState('all');
+  const [branchFilter, setBranchFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState('all');
   const [stageFilter, setStageFilter] = useState('all');
 
   const queryParams = useMemo<QueryParams>(() => ({
     from: dateRange.from,
     to: dateRange.to,
-    department: deptFilter === 'all' ? undefined : deptFilter,
+    branch: branchFilter === 'all' ? undefined : branchFilter,
     type: typeFilter === 'all' ? undefined : typeFilter,
     status: stageFilter === 'all' ? undefined : stageFilter,
     search: searchQuery || undefined,
-  }), [dateRange.from, dateRange.to, deptFilter, searchQuery, stageFilter, typeFilter]);
+  }), [dateRange.from, dateRange.to, branchFilter, searchQuery, stageFilter, typeFilter]);
 
   const { data, isLoading } = usePendingNocReport(queryParams);
 
@@ -41,7 +41,7 @@ export default function PendingNOCReport() {
       id: request.noc_id,
       student_name: request.student_name,
       enrollment_number: request.enrollment_number,
-      department: request.department,
+      branch: request.branch,
       batch: request.batch,
       noc_type: request.noc_type,
       company_name: request.company_name,
@@ -53,17 +53,15 @@ export default function PendingNOCReport() {
     }));
   }, [data]);
 
-  const departments = useMemo(() => {
-    return Array.from(new Set(pendingRequests.map((request) => request.department))).sort();
-  }, [pendingRequests]);
+  const branches = useMemo(() => Array.from(new Set(pendingRequests.map((r: any) => r.branch).filter(Boolean))).sort() as string[], [pendingRequests]);
 
   const stats = data?.stats ?? { total: 0, at_faculty: 0, at_tpo: 0, at_verification: 0, overdue: 0 };
 
   const handleExport = () => {
     const rows = pendingRequests.map((request) =>
-      `${request.student_name},${request.enrollment_number},${request.department},${NOC_TYPE_LABELS[request.noc_type as keyof typeof NOC_TYPE_LABELS] ?? request.noc_type},${request.company_name},${new Date(request.created_at).toLocaleDateString('en-IN')},${NOC_STATUS_CONFIG[request.status as keyof typeof NOC_STATUS_CONFIG]?.label ?? request.status},${request.days_pending}`
+      `${request.student_name},${request.enrollment_number},${request.branch},${NOC_TYPE_LABELS[request.noc_type as keyof typeof NOC_TYPE_LABELS] ?? request.noc_type},${request.company_name},${new Date(request.created_at).toLocaleDateString('en-IN')},${NOC_STATUS_CONFIG[request.status as keyof typeof NOC_STATUS_CONFIG]?.label ?? request.status},${request.days_pending}`
     );
-    const csv = `Student,Roll No,Department,NOC Type,Company,Submitted,Stage,Days Pending\n${rows.join('\n')}`;
+    const csv = `Student,Roll No,Branch,NOC Type,Company,Submitted,Stage,Days Pending\n${rows.join('\n')}`;
     downloadCSV(csv, 'pending_noc_requests');
   };
 
@@ -99,12 +97,14 @@ export default function PendingNOCReport() {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input placeholder="Search name, roll no, company..." value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} className="pl-9" />
             </div>
-            <Select value={deptFilter} onValueChange={setDeptFilter}>
-              <SelectTrigger><SelectValue placeholder="Department" /></SelectTrigger>
+            <Select value={branchFilter} onValueChange={setBranchFilter}>
+              <SelectTrigger className="w-full md:w-56">
+                <SelectValue placeholder="Branch" />
+              </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Departments</SelectItem>
-                {departments.map((department) => (
-                  <SelectItem key={department} value={department}>{department}</SelectItem>
+                <SelectItem value="all">All Branches</SelectItem>
+                {branches.map((branch) => (
+                  <SelectItem key={branch} value={branch}>{branch}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -134,7 +134,7 @@ export default function PendingNOCReport() {
                 <TableRow>
                   <TableHead className="min-w-[150px]">Student</TableHead>
                   <TableHead>Roll No.</TableHead>
-                  <TableHead>Department</TableHead>
+                  <TableHead>Branch</TableHead>
                   <TableHead>NOC Type</TableHead>
                   <TableHead>Company</TableHead>
                   <TableHead>Submitted</TableHead>
@@ -162,7 +162,7 @@ export default function PendingNOCReport() {
                       <TableRow key={request.id}>
                         <TableCell className="font-medium text-sm">{request.student_name}</TableCell>
                         <TableCell className="text-sm">{request.enrollment_number}</TableCell>
-                        <TableCell className="text-sm">{request.department}</TableCell>
+                        <TableCell className="text-sm">{request.branch}</TableCell>
                         <TableCell>
                           <Badge variant="outline" className="text-xs">{NOC_TYPE_LABELS[request.noc_type as keyof typeof NOC_TYPE_LABELS] ?? request.noc_type}</Badge>
                         </TableCell>

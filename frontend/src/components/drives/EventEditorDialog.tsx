@@ -17,7 +17,6 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Textarea } from '@/components/ui/textarea';
 import { useCreateEvent, useEventDetail, useUpdateEvent } from '@/hooks/use-event-api';
 import { usePostings } from '@/hooks/use-posting-api';
-import { useUsers } from '@/hooks/use-admin-api';
 import {
   buildCreateEventPayload,
   createEmptyEventFormValues,
@@ -56,19 +55,6 @@ export function EventEditorDialog({ open, onOpenChange, eventId }: EventEditorDi
   const [formValues, setFormValues] = useState<EventFormValues>(createEmptyEventFormValues());
   const { options: eventTypeOptions, isLoading: eventTypesLoading } = useEventTypeOptions(open);
   const { options: postingTypeOptions, isLoading: postingTypesLoading } = usePostingTypeOptions(open);
-
-  // Faculty coordinator picker — real faculty user accounts (id → name). The stored ids drive faculty
-  // event visibility (backend scopes by user.id); names are kept for display/export.
-  const facultyUsersQuery = useUsers(
-    open
-      ? { role: 'faculty_coordinator', is_active: 'true', page: 1, limit: 200, sort_by: 'name', sort_order: 'asc' }
-      : { limit: 1 },
-  );
-  const facultyUsers = facultyUsersQuery.data?.data ?? [];
-  const facultyOptions = useMemo(
-    () => facultyUsers.map((user) => ({ value: user.id, label: user.name })),
-    [facultyUsers],
-  );
 
   // All postings of the selected posting type — drives BOTH the Company dropdown (distinct
   // companies) and the Linked Posting dropdown (filtered by the chosen company).
@@ -159,11 +145,8 @@ export function EventEditorDialog({ open, onOpenChange, eventId }: EventEditorDi
 
   async function handleSubmit() {
     try {
-      // Resolve display names for the selected coordinator ids (kept parallel for display/export).
-      const coordinatorNames = formValues.faculty_coordinator_ids
-        .map((id) => facultyUsers.find((user) => user.id === id)?.name)
-        .filter((name): name is string => Boolean(name));
-      const payload = buildCreateEventPayload(formValues, coordinatorNames);
+      // Faculty coordinators are no longer editable here; preserve existing names on edit.
+      const payload = buildCreateEventPayload(formValues, formValues.faculty_coordinators);
       if (isEditing && eventId) {
         await updateEvent.mutateAsync({ eventId, data: payload });
         toast.success('Event updated successfully.');
@@ -449,21 +432,6 @@ export function EventEditorDialog({ open, onOpenChange, eventId }: EventEditorDi
                   <p className="text-xs text-muted-foreground">Comma-separated values.</p>
                 </div>
 
-                <div className="space-y-2">
-                  <Label>Faculty Coordinators</Label>
-                  <SearchableMultiSelect
-                    options={facultyOptions}
-                    values={formValues.faculty_coordinator_ids}
-                    onChange={(values) => updateField('faculty_coordinator_ids', values)}
-                    placeholder="Select faculty coordinators"
-                    isLoading={facultyUsersQuery.isLoading}
-                    loadingMessage="Loading faculty..."
-                    emptyMessage="No faculty coordinators found."
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Assigned faculty see this event under their Department Events.
-                  </p>
-                </div>
               </div>
             </div>
           )}

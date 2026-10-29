@@ -61,7 +61,7 @@ export function EventAttendanceDialog({
       const fields = [
         assignment.student.full_name,
         assignment.student.enrollment_number,
-        assignment.student.department,
+        assignment.student.branch ?? assignment.student.department,
       ];
       return fields.some((field) => field.toLowerCase().includes(query));
     });
@@ -184,7 +184,7 @@ export function EventAttendanceDialog({
                     <TableRow>
                       <TableHead>Student</TableHead>
                       <TableHead>Enrollment</TableHead>
-                      <TableHead>Department</TableHead>
+                      <TableHead>Branch</TableHead>
                       <TableHead>Current</TableHead>
                       <TableHead className="text-right">Update</TableHead>
                     </TableRow>
@@ -196,7 +196,7 @@ export function EventAttendanceDialog({
                           {assignment.student.full_name}
                         </TableCell>
                         <TableCell>{assignment.student.enrollment_number}</TableCell>
-                        <TableCell>{assignment.student.department}</TableCell>
+                        <TableCell>{assignment.student.branch ?? assignment.student.department}</TableCell>
                         <TableCell>
                           {attendance[assignment.student_id] ? (
                             attendanceStatusLabels[attendance[assignment.student_id] as AttendanceStatus]

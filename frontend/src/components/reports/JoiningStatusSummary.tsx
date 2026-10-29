@@ -8,20 +8,19 @@ import { useCompanyMasterReport, useJoiningStatusReport } from '@/hooks/use-repo
 import { JOINING_STATUS_CONFIG } from '@/types/offer';
 import { ReportToolbar, downloadCSV, type DateRange } from './ReportToolbar';
 import PostingTypeFilter from './PostingTypeFilter';
-import { uniqueNonEmptyStrings } from './reportUtils';
 
 type QueryParams = {
   from?: Date;
   to?: Date;
   company_id?: string;
-  department?: string;
+  branch?: string;
   posting_type?: string;
 };
 
 export default function JoiningStatusSummary() {
   const [dateRange, setDateRange] = useState<DateRange>({ from: undefined, to: undefined });
   const [companyFilter, setCompanyFilter] = useState('all');
-  const [deptFilter, setDeptFilter] = useState('all');
+  const [branchFilter, setBranchFilter] = useState('all');
   const [postingTypeFilter, setPostingTypeFilter] = useState('all');
 
   const { data: companyData } = useCompanyMasterReport();
@@ -30,9 +29,9 @@ export default function JoiningStatusSummary() {
     from: dateRange.from,
     to: dateRange.to,
     company_id: companyFilter === 'all' ? undefined : companyFilter,
-    department: deptFilter === 'all' ? undefined : deptFilter,
+    branch: branchFilter === 'all' ? undefined : branchFilter,
     posting_type_master_id: postingTypeFilter === 'all' ? undefined : postingTypeFilter,
-  }), [companyFilter, dateRange.from, dateRange.to, deptFilter, postingTypeFilter]);
+  }), [companyFilter, dateRange.from, dateRange.to, branchFilter, postingTypeFilter]);
 
   const { data, isLoading } = useJoiningStatusReport(queryParams);
 
@@ -48,7 +47,7 @@ export default function JoiningStatusSummary() {
       id: offer.offer_id,
       student_name: offer.student_name,
       enrollment_number: offer.enrollment_number,
-      department: offer.department,
+      branch: offer.branch,
       company_name: offer.company_name,
       role: offer.role,
       joining_status: offer.joining_status,
@@ -59,16 +58,14 @@ export default function JoiningStatusSummary() {
     }));
   }, [data]);
 
-  const departments = useMemo<string[]>(
-    () => uniqueNonEmptyStrings(offers.map((offer) => offer.department)),
-    [offers],
-  );
+  const branches = useMemo(() => Array.from(new Set(offers.map((r: any) => r.branch).filter(Boolean))).sort() as string[], [offers]);
+
   const stats = data?.stats ?? { total: 0, joined: 0, pending: 0, dnj: 0, rate: 0 };
 
   const handleExport = () => {
-    const csv = `Student,Enrollment,Department,Company,Role,Joining Status,Joining Date,Verified By,DNJ Reason\n` +
+    const csv = `Student,Enrollment,Branch,Company,Role,Joining Status,Joining Date,Verified By,DNJ Reason\n` +
       offers.map((offer) =>
-        `${offer.student_name},${offer.enrollment_number},${offer.department},${offer.company_name},${offer.role},${JOINING_STATUS_CONFIG[offer.joining_status as keyof typeof JOINING_STATUS_CONFIG]?.label ?? offer.joining_status},${offer.joining_date ? new Date(offer.joining_date).toLocaleDateString('en-IN') : '—'},${offer.joining_verified_by || '-'},"${offer.dnj_reason || '-'}"`
+        `${offer.student_name},${offer.enrollment_number},${offer.branch},${offer.company_name},${offer.role},${JOINING_STATUS_CONFIG[offer.joining_status as keyof typeof JOINING_STATUS_CONFIG]?.label ?? offer.joining_status},${offer.joining_date ? new Date(offer.joining_date).toLocaleDateString('en-IN') : '—'},${offer.joining_verified_by || '-'},"${offer.dnj_reason || '-'}"`
       ).join('\n');
     downloadCSV(csv, 'joining_status_summary');
   };
@@ -82,12 +79,14 @@ export default function JoiningStatusSummary() {
             onValueChange={setPostingTypeFilter}
             triggerClassName="h-9 w-[180px] text-xs"
           />
-          <Select value={deptFilter} onValueChange={setDeptFilter}>
-            <SelectTrigger className="h-9 w-[160px] text-xs"><SelectValue placeholder="Department" /></SelectTrigger>
+          <Select value={branchFilter} onValueChange={setBranchFilter}>
+            <SelectTrigger className="w-full md:w-56">
+              <SelectValue placeholder="Branch" />
+            </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All Departments</SelectItem>
-              {departments.map((department) => (
-                <SelectItem key={department} value={department}>{department}</SelectItem>
+              <SelectItem value="all">All Branches</SelectItem>
+              {branches.map((branch) => (
+                <SelectItem key={branch} value={branch}>{branch}</SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -118,7 +117,7 @@ export default function JoiningStatusSummary() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Student</TableHead>
-                  <TableHead>Department</TableHead>
+                  <TableHead>Branch</TableHead>
                   <TableHead>Company</TableHead>
                   <TableHead>Role</TableHead>
                   <TableHead>Joining Status</TableHead>
@@ -140,7 +139,7 @@ export default function JoiningStatusSummary() {
                   offers.map((offer) => (
                     <TableRow key={offer.id}>
                       <TableCell><div><p className="font-medium">{offer.student_name}</p><p className="text-xs text-muted-foreground">{offer.enrollment_number}</p></div></TableCell>
-                      <TableCell>{offer.department}</TableCell>
+                      <TableCell>{offer.branch}</TableCell>
                       <TableCell>{offer.company_name}</TableCell>
                       <TableCell>{offer.role}</TableCell>
                       <TableCell><Badge className={JOINING_STATUS_CONFIG[offer.joining_status as keyof typeof JOINING_STATUS_CONFIG]?.color ?? ''} variant="outline">{JOINING_STATUS_CONFIG[offer.joining_status as keyof typeof JOINING_STATUS_CONFIG]?.label ?? offer.joining_status}</Badge></TableCell>

@@ -230,7 +230,7 @@ export function EventDetailDialog({ eventId, open, onOpenChange, mode = 'admin' 
                         <TableRow>
                           <TableHead>Student</TableHead>
                           <TableHead>Enrollment</TableHead>
-                          <TableHead>Department</TableHead>
+                          <TableHead>Branch</TableHead>
                           <TableHead>Panel / Slot</TableHead>
                           <TableHead>Attendance</TableHead>
                         </TableRow>
@@ -247,7 +247,7 @@ export function EventDetailDialog({ eventId, open, onOpenChange, mode = 'admin' 
                                 {assignment.student.full_name}
                               </TableCell>
                               <TableCell>{assignment.student.enrollment_number}</TableCell>
-                              <TableCell>{assignment.student.department}</TableCell>
+                              <TableCell>{assignment.student.branch ?? assignment.student.department}</TableCell>
                               <TableCell>
                                 {panel?.panel_name || 'Unassigned'}
                                 {assignment.slot_time ? ` • ${assignment.slot_time}` : ''}

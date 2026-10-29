@@ -39,16 +39,15 @@ import {
 import { SortableTableHead, type SortOrder } from '@/components/shared/SortableTableHead';
 import { useServerSort } from '@/hooks/use-server-sort';
 import { useNocs } from '@/hooks/use-noc-api';
-import { usePostingTypeOptions } from '@/hooks/use-posting-type-options';
 import AdminListScopeFilters, { type DateRangeValue } from '@/components/admin/AdminListScopeFilters';
-import { COMPLETION_STATUS_CONFIG, getNocDepartment, getNocProgramLabel, getNocSearchFields, getNocStageLabel, getNocStudentName } from '@/lib/nocModule';
+import { COMPLETION_STATUS_CONFIG, getNocBranch, getNocProgramLabel, getNocSearchFields, getNocStageLabel, getNocStudentName } from '@/lib/nocModule';
 import { resolveBackendAssetUrl } from '@/lib/studentModule';
+import { toDateParam } from '@/lib/formatters';
 import {
   NOC_STATUS_CONFIG,
   NOC_TYPE_LABELS,
   type ApiNocListItem,
   type NOCStatus,
-  type NOCType,
 } from '@/types/noc';
 
 function getErrorMessage(error: unknown, fallback = 'Something went wrong') {
@@ -109,6 +108,7 @@ function NocTable({
             <SortableTableHead label="Company" columnKey="company" sortBy={sortBy} sortOrder={sortOrder} onSort={onSort} />
             <SortableTableHead label="Posting Type" columnKey="program" className="whitespace-nowrap" sortBy={sortBy} sortOrder={sortOrder} onSort={onSort} />
             <SortableTableHead label="Status" columnKey="status" className="whitespace-nowrap" sortBy={sortBy} sortOrder={sortOrder} onSort={onSort} />
+            <TableHead className="whitespace-nowrap">NOC Status</TableHead>
             <TableHead className="whitespace-nowrap">Stage</TableHead>
             <TableHead>NOC Number</TableHead>
             <TableHead>Documents</TableHead>
@@ -125,7 +125,7 @@ function NocTable({
                 <div>
                   <p className="font-medium text-foreground">{getNocStudentName(request)}</p>
                   <p className="text-xs text-muted-foreground">{request.student.enrollment_number}</p>
-                  <p className="text-xs text-muted-foreground">{getNocDepartment(request)}</p>
+                  <p className="text-xs text-muted-foreground">{getNocBranch(request)}</p>
                 </div>
               </TableCell>
               <TableCell>
@@ -148,6 +148,16 @@ function NocTable({
                   {NOC_STATUS_CONFIG[request.status].label}
                 </Badge>
               </TableCell>
+              <TableCell>
+                <div className="flex flex-col items-start gap-1">
+                  <Badge variant={request.is_active === false ? 'outline' : 'default'} className="whitespace-nowrap">
+                    {request.is_active === false ? 'Inactive' : 'Active'}
+                  </Badge>
+                  {request.is_reissue ? (
+                    <Badge variant="secondary" className="whitespace-nowrap text-xs">Re-Issued</Badge>
+                  ) : null}
+                </div>
+              </TableCell>
               <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
                 {getNocStageLabel(request.status)}
               </TableCell>
@@ -155,8 +165,20 @@ function NocTable({
                 {request.noc_number || '—'}
               </TableCell>
               <TableCell>
-                {request.offer_letter_url || request.supporting_document_url || (showCompletion && (request.certificate_url || request.completion_certificate_url)) ? (
+                {request.offer_letter_url || request.supporting_document_url || request.termination_letter_url || (showCompletion && (request.certificate_url || request.completion_certificate_url)) ? (
                   <div className="flex flex-col items-start gap-1">
+                    {request.termination_letter_url && (
+                      <Button variant="outline" size="sm" className="h-7 px-2" asChild>
+                        <a
+                          href={resolveBackendAssetUrl(request.termination_letter_url)}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          <ExternalLink className="mr-1.5 h-3.5 w-3.5" />
+                          Termination letter
+                        </a>
+                      </Button>
+                    )}
                     {request.offer_letter_url && (
                       <Button variant="outline" size="sm" className="h-7 px-2" asChild>
                         <a
@@ -278,7 +300,7 @@ function CompletionRequestsTable({
                 <div>
                   <p className="font-medium text-foreground">{getNocStudentName(request)}</p>
                   <p className="text-xs text-muted-foreground">{request.student.enrollment_number}</p>
-                  <p className="text-xs text-muted-foreground">{getNocDepartment(request)}</p>
+                  <p className="text-xs text-muted-foreground">{getNocBranch(request)}</p>
                 </div>
               </TableCell>
               <TableCell>
@@ -321,7 +343,6 @@ function CompletionRequestsTable({
 
 export default function AdminNOCManagement() {
   const [activeTab, setActiveTab] = useState<'pending_faculty' | 'pending' | 'completion' | 'issued' | 'rejected' | 'all'>('pending_faculty');
-  const [typeFilter, setTypeFilter] = useState<'all' | NOCType>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | NOCStatus>('all');
   const [postingTypeFilter, setPostingTypeFilter] = useState('all');
   const [instituteFilter, setInstituteFilter] = useState('');
@@ -338,7 +359,6 @@ export default function AdminNOCManagement() {
   const [completionReviewNoc, setCompletionReviewNoc] = useState<ApiNocListItem | null>(null);
   const [studentDetailsId, setStudentDetailsId] = useState<string | null>(null);
   const deferredSearch = useDeferredValue(searchTerm);
-  const { options: postingTypeOptions, isLoading: postingTypesLoading } = usePostingTypeOptions();
 
   const tabStatus =
     activeTab === 'pending_faculty'
@@ -361,22 +381,20 @@ export default function AdminNOCManagement() {
     // The Completion Certificates tab lists pending completion submissions regardless of NOC status.
     status: isCompletionTab ? undefined : tabStatus,
     completion_status: isCompletionTab ? 'pending' : undefined,
-    noc_type: typeFilter === 'all' ? undefined : typeFilter,
     // NOC.program stores the posting-type VALUE string (not the uuid) — bind option.value below.
     posting_type: postingTypeFilter === 'all' ? undefined : postingTypeFilter,
     institute: instituteFilter || undefined,
     course: courseFilter || undefined,
     branch: branchFilter || undefined,
     academic_year: academicYearFilter === 'all' ? undefined : academicYearFilter,
-    date_from: dateRange.from ? dateRange.from.toISOString() : undefined,
-    date_to: dateRange.to ? dateRange.to.toISOString() : undefined,
+    date_from: toDateParam(dateRange.from),
+    date_to: toDateParam(dateRange.to),
     sort_by,
     sort_order,
   });
   const totalQuery = useNocs({ page: 1, limit: 1 });
   const pendingFacultyQuery = useNocs({ page: 1, limit: 1, status: 'pending_faculty' });
   const pendingQuery = useNocs({ page: 1, limit: 1, status: 'pending_tpo' });
-  const approvedQuery = useNocs({ page: 1, limit: 1, status: 'approved' });
   const issuedQuery = useNocs({ page: 1, limit: 1, status: 'issued' });
   const rejectedQuery = useNocs({ page: 1, limit: 1, status: 'rejected' });
 
@@ -405,11 +423,10 @@ export default function AdminNOCManagement() {
           </Alert>
         )}
 
-        <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-6">
+        <div className="grid gap-4 md:grid-cols-3 xl:grid-cols-5">
           <StatCard title="Total Requests" value={String(totalQuery.data?.pagination.total ?? 0)} hint="Across the live module" />
           <StatCard title="Pending Faculty" value={String(pendingFacultyQuery.data?.pagination.total ?? 0)} hint="Awaiting faculty approval" />
           <StatCard title="Pending TPO" value={String(pendingQuery.data?.pagination.total ?? 0)} hint="Ready for final approval" />
-          <StatCard title="Approved" value={String(approvedQuery.data?.pagination.total ?? 0)} hint="Ready to issue" />
           <StatCard title="Issued" value={String(issuedQuery.data?.pagination.total ?? 0)} hint="Certificate generated" />
           <StatCard title="Rejected" value={String(rejectedQuery.data?.pagination.total ?? 0)} hint="Closed requests" />
         </div>
@@ -433,48 +450,6 @@ export default function AdminNOCManagement() {
                 />
               </div>
 
-              <Select
-                value={typeFilter}
-                onValueChange={(value) => {
-                  setTypeFilter(value as 'all' | NOCType);
-                  setPage(1);
-                }}
-              >
-                <SelectTrigger className="w-full lg:w-48">
-                  <SelectValue placeholder="NOC type" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All types</SelectItem>
-                  {(['internship', 'training', 'project'] as NOCType[]).map((type) => (
-                    <SelectItem key={type} value={type}>
-                      {NOC_TYPE_LABELS[type]}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-
-              {/* NOC.program stores the posting-type VALUE string, so bind option.value (not option.id). */}
-              <Select
-                value={postingTypeFilter}
-                onValueChange={(value) => {
-                  setPostingTypeFilter(value);
-                  setPage(1);
-                }}
-                disabled={postingTypesLoading}
-              >
-                <SelectTrigger className="w-full lg:w-56">
-                  <SelectValue placeholder="Posting Type" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Posting Types</SelectItem>
-                  {postingTypeOptions.map((option) => (
-                    <SelectItem key={option.id} value={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-
               {activeTab === 'all' && (
                 <Select
                   value={statusFilter}
@@ -488,7 +463,7 @@ export default function AdminNOCManagement() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All statuses</SelectItem>
-                    {(['pending_faculty', 'pending_tpo', 'approved', 'issued', 'rejected'] as NOCStatus[]).map((status) => (
+                    {(['pending_faculty', 'pending_tpo', 'issued', 'rejected'] as NOCStatus[]).map((status) => (
                       <SelectItem key={status} value={status}>
                         {NOC_STATUS_CONFIG[status].label}
                       </SelectItem>
@@ -502,6 +477,7 @@ export default function AdminNOCManagement() {
               course={{ value: courseFilter, onChange: (value) => { setCourseFilter(value); setPage(1); } }}
               branch={{ value: branchFilter, onChange: (value) => { setBranchFilter(value); setPage(1); } }}
               academicYear={{ value: academicYearFilter, onChange: (value) => { setAcademicYearFilter(value); setPage(1); } }}
+              postingType={{ value: postingTypeFilter, onChange: (value) => { setPostingTypeFilter(value); setPage(1); }, bind: 'value' }}
               dateRange={{ value: dateRange, onChange: (range) => { setDateRange(range); setPage(1); } }}
             />
           </CardContent>

@@ -15,6 +15,13 @@ export async function getNocs(req: Request, res: Response, next: NextFunction) {
   } catch (err) { next(err); }
 }
 
+export async function getFacultyNocSummary(req: Request, res: Response, next: NextFunction) {
+  try {
+    const summary = await service.getFacultyNocSummary(req.user!.tenant_id, req.user!);
+    res.json(summary);
+  } catch (err) { next(err); }
+}
+
 export async function getNocById(req: Request, res: Response, next: NextFunction) {
   try {
     const id = Array.isArray(req.params.nocId) ? req.params.nocId[0] : req.params.nocId;
@@ -56,6 +63,22 @@ export async function uploadSupportingDocument(req: Request, res: Response, next
     res.status(201).json({
       supporting_document_url: `/uploads/noc-supporting-documents/${req.file.filename}`,
       supporting_document_name: req.file.originalname,
+      document_mime_type: req.file.mimetype,
+      document_size: req.file.size,
+    });
+  } catch (err) { next(err); }
+}
+
+export async function uploadTerminationLetter(req: Request, res: Response, next: NextFunction) {
+  try {
+    if (!req.file) {
+      res.status(400).json({ error: { code: 'FILE_REQUIRED', message: 'Termination / relieving letter file is required' } });
+      return;
+    }
+
+    res.status(201).json({
+      termination_letter_url: `/uploads/noc-termination-letters/${req.file.filename}`,
+      termination_letter_name: req.file.originalname,
       document_mime_type: req.file.mimetype,
       document_size: req.file.size,
     });

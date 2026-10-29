@@ -63,3 +63,9 @@ coverage/
 .claude/
 .lovable/
 .124EFA20-2BAA-4C41-B104-A280A551D5FB-er1G
+
+# PlaceReady is its own repo (github.com/swaruppatilheptanesia/silver-oak-placeready)
+placeready/
+
+*.xlsx
+

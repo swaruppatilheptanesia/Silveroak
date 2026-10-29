@@ -737,7 +737,7 @@ export default function Profile() {
                     )}
                     <span className="flex items-center gap-1.5">
                       <MapPin className="h-4 w-4" />
-                      {student.department} • {student.batch}
+                      {student.branch ?? student.department} • {student.batch}
                     </span>
                   </div>
                 </div>
@@ -909,7 +909,7 @@ export default function Profile() {
                 <ReadonlyField label="Email" value={student.email} />
                 <ReadonlyField label="Enrollment Number" value={student.enrollment_number} />
                 <ReadonlyField label="Roll Number" value={student.roll_number || 'Not assigned'} />
-                <ReadonlyField label="Department" value={student.department} />
+                <ReadonlyField label="Branch" value={student.branch ?? student.department} />
                 <ReadonlyField label="Batch" value={student.batch} />
                 <ReadonlyField label="Course" value={student.course || 'Not assigned'} />
                 <ReadonlyField label="Institute" value={student.institute || 'Not assigned'} />

@@ -27,7 +27,8 @@ export function ProtectedRoute({
   const isStudentGateRoute = location.pathname === '/student/access' || location.pathname === '/student/policy-gate';
   const studentProfileQuery = useStudentProfile(Boolean(isAuthenticated && user?.role === 'student' && !isStudentGateRoute));
   const requiresPermissionSync = Boolean(requiredPermission || requiredAnyPermissions)
-    && (user?.role === 'tpo_admin' || user?.role === 'tpo_employee' || user?.role === 'super_admin');
+    && (user?.role === 'tpo_admin' || user?.role === 'tpo_employee' || user?.role === 'super_admin'
+      || user?.role === 'student');
 
   React.useEffect(() => {
     if (!requiresPermissionSync || syncAttemptedRef.current) {

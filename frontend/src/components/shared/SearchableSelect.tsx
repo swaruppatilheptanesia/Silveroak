@@ -81,7 +81,7 @@ export function SearchableSelect({
           disabled={disabled}
           className={cn('w-full justify-between font-normal', buttonClassName, className)}
         >
-          <span className="truncate text-left">
+          <span className="min-w-0 flex-1 truncate text-left">
             {selectedOption?.label ?? placeholder}
           </span>
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />

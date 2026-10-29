@@ -182,6 +182,24 @@ export async function uploadResume(req: Request, res: Response, next: NextFuncti
   } catch (err) { next(err); }
 }
 
+export async function updateResume(req: Request, res: Response, next: NextFunction) {
+  try {
+    if (!req.file) {
+      res.status(400).json({ error: { code: 'FILE_REQUIRED', message: 'Resume file is required' } });
+      return;
+    }
+    const resumeId = Array.isArray(req.params.resumeId) ? req.params.resumeId[0] : req.params.resumeId;
+    const name = typeof req.body?.name === 'string' && req.body.name.trim() ? req.body.name.trim() : undefined;
+    const resume = await studentService.updateResume(req.user!.id, resumeId!, {
+      name,
+      file_url: `/uploads/resumes/${req.file.filename}`,
+      file_size: req.file.size,
+      mime_type: req.file.mimetype,
+    });
+    res.json(resume);
+  } catch (err) { next(err); }
+}
+
 export async function setDefaultResume(req: Request, res: Response, next: NextFunction) {
   try {
     const resumeId = Array.isArray(req.params.resumeId) ? req.params.resumeId[0] : req.params.resumeId;

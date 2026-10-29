@@ -6,6 +6,7 @@ import { notifyManyUsers } from '../notifications/notification.service';
 import type {
   CreateTemplateInput,
   GenerateCircularInput,
+  QueryGeneratedCircularsInput,
   QueryTemplatesInput,
   UpdateTemplateInput,
 } from './circular.schema';
@@ -234,4 +235,71 @@ export async function getGeneratedCirculars(tenantId: string) {
     },
     orderBy: { generated_at: 'desc' },
   });
+}
+
+// Whitelist of sortable columns → Prisma orderBy. `title`/`sourceLabel` are derived client-side and
+// are NOT server-sortable. Never inject sort_by raw into Prisma.
+function getGeneratedCircularOrderBy(sortBy?: string, sortOrder: 'asc' | 'desc' = 'desc') {
+  switch (sortBy) {
+    case 'company_name': return { company_name: sortOrder };
+    case 'role_name': return { role_name: sortOrder };
+    case 'type': return { type: sortOrder };
+    case 'generated_at': return { generated_at: sortOrder };
+    default: return { generated_at: sortOrder };
+  }
+}
+
+/**
+ * Paginated + searchable generated-circulars list for the admin Circulars screen. Separate from the flat
+ * `getGeneratedCirculars` (kept for the "start from circular" picker + FacultyCirculars, which need the
+ * full set). Server search covers `company_name`/`role_name`/`type` + the company relation name.
+ */
+export async function getGeneratedCircularsPaginated(tenantId: string, filters: QueryGeneratedCircularsInput) {
+  const { page, limit, search, sort_by, sort_order } = filters;
+  const where: Record<string, unknown> = { tenant_id: tenantId };
+  if (search) {
+    where.OR = [
+      { company_name: { contains: search, mode: 'insensitive' } },
+      { role_name: { contains: search, mode: 'insensitive' } },
+      { type: { contains: search, mode: 'insensitive' } },
+      { company: { is: { name: { contains: search, mode: 'insensitive' } } } },
+    ];
+  }
+
+  const [circulars, total] = await Promise.all([
+    prisma.generatedCircular.findMany({
+      where,
+      ...buildPrismaQuery(page, limit),
+      orderBy: getGeneratedCircularOrderBy(sort_by, sort_order),
+      include: {
+        template: {
+          select: { id: true, name: true, type: true, status: true, version: true, sections: true },
+        },
+        company: { select: { id: true, name: true } },
+        generated_by_user: { select: { id: true, name: true } },
+      },
+    }),
+    prisma.generatedCircular.count({ where }),
+  ]);
+
+  return { data: circulars, pagination: paginate(page, limit, total) };
+}
+
+/**
+ * Permanently delete a generated circular. Generated circulars are point-in-time snapshots with no
+ * lifecycle/status, so delete-and-regenerate is the only correction path (no edit). Tenant-scoped.
+ */
+export async function deleteGeneratedCircular(tenantId: string, circularId: string) {
+  const existing = await prisma.generatedCircular.findFirst({
+    where: { id: circularId, tenant_id: tenantId },
+    select: { id: true },
+  });
+
+  if (!existing) {
+    throw new NotFoundError('Circular not found');
+  }
+
+  await prisma.generatedCircular.delete({ where: { id: existing.id } });
+
+  return { id: existing.id };
 }

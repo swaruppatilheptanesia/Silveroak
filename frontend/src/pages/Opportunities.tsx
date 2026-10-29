@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   AlertCircle,
@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { EmptyState } from '@/components/shared/EmptyState';
+import { ListPager } from '@/components/shared/ListPager';
 import { OpportunityCard } from '@/components/opportunities/OpportunityCard';
 import {
   OpportunityFilters,
@@ -37,6 +38,9 @@ const STORAGE_KEY = 'opportunity-filter-preferences';
 function getErrorMessage(error: unknown, fallback = 'Something went wrong') {
   return error instanceof Error ? error.message : fallback;
 }
+
+// Cards rendered per page in each tab (client-side display pagination).
+const PAGE_SIZE = 12;
 
 function OpportunitySkeleton() {
   return (
@@ -161,7 +165,8 @@ export default function Opportunities() {
       institute: profileStudent?.institute ?? '',
       course: profileStudent?.course ?? '',
       semester: profileAcademic?.semester ?? null,
-      department: profileStudent?.department ?? '',
+      // Eligibility branch-matching uses the real ERP branch (falls back to course-derived department).
+      department: profileStudent?.branch ?? profileStudent?.department ?? '',
       batch: profileStudent?.batch ?? '',
       cgpa: profileAcademic?.cgpa ?? null,
       backlog_count: profileAcademic?.backlog_count ?? 0,
@@ -247,6 +252,21 @@ export default function Opportunities() {
     () => new Set(recommendedPostings.map((item) => item.posting.id)),
     [recommendedPostings]
   );
+
+  // Client-side (display) pagination — the fetch stays a single bounded request; we only cap how many
+  // cards render at once, per tab. All filters/eligibility/counts still run over the full filtered set.
+  const eligibleList = useMemo(
+    () => filteredPostings.filter(({ eligibility }) => eligibility.eligible),
+    [filteredPostings]
+  );
+  const [eligiblePage, setEligiblePage] = useState(1);
+  const [allPage, setAllPage] = useState(1);
+  useEffect(() => {
+    setEligiblePage(1);
+    setAllPage(1);
+  }, [filteredPostings]);
+  const pagedEligible = eligibleList.slice((eligiblePage - 1) * PAGE_SIZE, eligiblePage * PAGE_SIZE);
+  const pagedAll = filteredPostings.slice((allPage - 1) * PAGE_SIZE, allPage * PAGE_SIZE);
 
   const activeFilterCount = useMemo(() => {
     let count = 0;
@@ -480,13 +500,13 @@ export default function Opportunities() {
           <Tabs defaultValue="eligible" className="w-full">
             <TabsList>
               <TabsTrigger value="eligible">
-                Eligible ({filteredPostings.filter(({ eligibility }) => eligibility.eligible).length})
+                Eligible ({eligibleList.length})
               </TabsTrigger>
               <TabsTrigger value="all">All ({filteredPostings.length})</TabsTrigger>
             </TabsList>
 
             <TabsContent value="eligible" className="mt-4">
-              {filteredPostings.filter(({ eligibility }) => eligibility.eligible).length === 0 ? (
+              {eligibleList.length === 0 ? (
                 <Card>
                   <CardContent className="p-0">
                     <EmptyState
@@ -498,10 +518,9 @@ export default function Opportunities() {
                   </CardContent>
                 </Card>
               ) : (
-                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                  {filteredPostings
-                    .filter(({ eligibility }) => eligibility.eligible)
-                    .map(({ posting, eligibility }) => (
+                <>
+                  <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                    {pagedEligible.map(({ posting, eligibility }) => (
                       <OpportunityCard
                         key={posting.id}
                         posting={posting}
@@ -510,13 +529,19 @@ export default function Opportunities() {
                         isRecommended={recommendedPostingIds.has(posting.id)}
                       />
                     ))}
-                </div>
+                  </div>
+                  <ListPager
+                    page={eligiblePage}
+                    totalPages={Math.ceil(eligibleList.length / PAGE_SIZE) || 1}
+                    onPageChange={setEligiblePage}
+                  />
+                </>
               )}
             </TabsContent>
 
             <TabsContent value="all" className="mt-4">
               <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                {filteredPostings.map(({ posting, eligibility }) => (
+                {pagedAll.map(({ posting, eligibility }) => (
                   <OpportunityCard
                     key={posting.id}
                     posting={posting}
@@ -526,6 +551,11 @@ export default function Opportunities() {
                   />
                 ))}
               </div>
+              <ListPager
+                page={allPage}
+                totalPages={Math.ceil(filteredPostings.length / PAGE_SIZE) || 1}
+                onPageChange={setAllPage}
+              />
             </TabsContent>
           </Tabs>
         )}

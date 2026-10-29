@@ -140,6 +140,24 @@ export function formatPostingTypeLabel(value: string): string {
   return trimmed.replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
+/**
+ * Narrow a list of posting-type options to those valid for the selected academic year.
+ * A posting type with an empty `targetAcademicYears` applies to ALL years (always kept).
+ * A falsy year or the "all" sentinel means no narrowing. Filters OPTIONS only — never records.
+ */
+export function filterPostingTypeOptionsByAcademicYear<T extends { targetAcademicYears: string[] }>(
+  options: T[],
+  academicYear: string | null | undefined,
+): T[] {
+  if (!academicYear || academicYear === 'all') return options;
+  const year = academicYear.trim().toLowerCase();
+  return options.filter(
+    (option) =>
+      option.targetAcademicYears.length === 0 ||
+      option.targetAcademicYears.some((value) => value.trim().toLowerCase() === year),
+  );
+}
+
 export function postingDetailToFormValues(posting: ApiPostingDetail): PostingFormValues {
   return {
     company_id: posting.company.id,

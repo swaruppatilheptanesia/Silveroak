@@ -193,7 +193,7 @@ async function getStudentAudience(tenantId: string, userId: string): Promise<Stu
       id: true,
       policy_accepted_at: true,
       institute: true,
-      department: true,
+      branch: true,
       course: true,
     },
   });
@@ -206,7 +206,7 @@ async function getStudentAudience(tenantId: string, userId: string): Promise<Stu
     studentId: student.id,
     policyAcceptedAt: student.policy_accepted_at,
     institute: student.institute,
-    branch: student.department,
+    branch: student.branch,
     course: student.course,
   };
 }
@@ -306,9 +306,15 @@ function buildPolicyAudienceWhere(audience: StudentAudience): Prisma.PolicyWhere
 }
 
 async function buildPolicyWhere(tenantId: string, filters: QueryPoliciesInput, user: Express.AuthUser): Promise<Prisma.PolicyWhereInput> {
-  const { category, global, posting_type_master_id } = filters;
+  const { category, global, posting_type_master_id, search } = filters;
   const where: Prisma.PolicyWhereInput = { tenant_id: tenantId };
   if (category) where.category = category;
+  if (search) {
+    where.OR = [
+      { title: { contains: search, mode: 'insensitive' } },
+      { description: { contains: search, mode: 'insensitive' } },
+    ];
+  }
 
   // When a specific posting type is requested, return that type's linked policies (for
   // students too — this is the posting-type policy they must accept before apply/interest).

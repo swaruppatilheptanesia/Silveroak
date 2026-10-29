@@ -101,7 +101,7 @@ function PostingApplicantsTable({
 }) {
   const { sorted, sort_by, sort_order, onSort } = useClientSort(applications, {
     candidate: (a) => a.student.full_name,
-    department: (a) => a.student.department,
+    branch: (a) => a.student.branch ?? a.student.department,
     stage: (a) => a.current_stage,
     applied: (a) => new Date(a.applied_at),
   });
@@ -112,7 +112,7 @@ function PostingApplicantsTable({
         <TableHeader>
           <TableRow>
             <SortableTableHead label="Candidate" columnKey="candidate" sortBy={sort_by} sortOrder={sort_order} onSort={onSort} />
-            <SortableTableHead label="Department" columnKey="department" sortBy={sort_by} sortOrder={sort_order} onSort={onSort} />
+            <SortableTableHead label="Branch" columnKey="branch" sortBy={sort_by} sortOrder={sort_order} onSort={onSort} />
             <SortableTableHead label="Stage" columnKey="stage" sortBy={sort_by} sortOrder={sort_order} onSort={onSort} />
             <SortableTableHead label="Applied" columnKey="applied" sortBy={sort_by} sortOrder={sort_order} onSort={onSort} />
             <TableHead className="text-right">Action</TableHead>
@@ -129,7 +129,7 @@ function PostingApplicantsTable({
               </TableCell>
               <TableCell>
                 <div className="text-sm">
-                  <p>{application.student.department}</p>
+                  <p>{application.student.branch ?? application.student.department}</p>
                   <p className="text-muted-foreground">Batch {application.student.batch}</p>
                 </div>
               </TableCell>
@@ -207,7 +207,7 @@ export default function RecruitmentPipeline() {
       const matchesSearch = !searchTerm || [
         application.student.full_name,
         application.student.enrollment_number,
-        application.student.department,
+        application.student.branch ?? application.student.department,
         application.student.batch,
       ].some((field) => field.toLowerCase().includes(searchTerm.toLowerCase()));
 
@@ -481,8 +481,8 @@ export default function RecruitmentPipeline() {
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
                 <div>
-                  <p className="text-sm text-muted-foreground">Department</p>
-                  <p className="font-medium">{selectedApplication.student.department}</p>
+                  <p className="text-sm text-muted-foreground">Branch</p>
+                  <p className="font-medium">{selectedApplication.student.branch ?? selectedApplication.student.department}</p>
                 </div>
                 <div>
                   <p className="text-sm text-muted-foreground">Batch</p>

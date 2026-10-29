@@ -3,6 +3,7 @@
  * Real API calls + mock data re-exports for gradual migration.
  */
 import { apiClient, tokenManager } from './apiClient';
+import { normalizePagination, type RawPagination } from '@/lib/pagination';
 import { parseApiErrorEnvelope, type ApiErrorDetail } from '@/lib/apiError';
 import type {
   ApiCompany,
@@ -91,8 +92,9 @@ function toQueryString(params: Record<string, unknown>): string {
 const employerApi = {
   // ── Companies ──
   getCompanies: async (params: CompanyQueryParams = {}): Promise<PaginatedResponse<ApiCompany>> => {
-    const res = await apiClient.get<PaginatedResponse<ApiCompany>>(`/companies${toQueryString(params)}`);
-    return throwIfError(res);
+    const res = await apiClient.get<{ data: ApiCompany[]; pagination: RawPagination }>(`/companies${toQueryString(params as Record<string, unknown>)}`);
+    const payload = throwIfError(res);
+    return { data: payload.data, pagination: normalizePagination(payload.pagination) };
   },
 
   getCompanyById: async (companyId: string): Promise<ApiCompanyDetail> => {
@@ -138,8 +140,9 @@ const employerApi = {
 
   // ── Recruiters ──
   getRecruiters: async (params: RecruiterQueryParams = {}): Promise<PaginatedResponse<ApiRecruiterListItem>> => {
-    const res = await apiClient.get<PaginatedResponse<ApiRecruiterListItem>>(`/recruiters${toQueryString(params)}`);
-    return throwIfError(res);
+    const res = await apiClient.get<{ data: ApiRecruiterListItem[]; pagination: RawPagination }>(`/recruiters${toQueryString(params as Record<string, unknown>)}`);
+    const payload = throwIfError(res);
+    return { data: payload.data, pagination: normalizePagination(payload.pagination) };
   },
 
   getRecruitersByCompany: async (companyId: string): Promise<ApiRecruiter[]> => {

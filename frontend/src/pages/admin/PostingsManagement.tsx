@@ -1,12 +1,12 @@
-import { useDeferredValue, useMemo, useState } from 'react';
+import { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Archive,
   Briefcase,
   Building2,
   Calendar,
-  Download,
   Eye,
+  FileSpreadsheet,
   FileText,
   Loader2,
   Plus,
@@ -42,12 +42,12 @@ import {
 } from '@/components/ui/table';
 import { SortableTableHead } from '@/components/shared/SortableTableHead';
 import { useServerSort } from '@/hooks/use-server-sort';
+import { ListPager } from '@/components/shared/ListPager';
 import { useClosePosting, usePostings, usePublishPosting, useRepublishPosting } from '@/hooks/use-posting-api';
-import { usePostingTypeOptions } from '@/hooks/use-posting-type-options';
 import { postingService } from '@/services/postingService';
-import { formatDate } from '@/lib/formatters';
+import { formatDate, toDateParam } from '@/lib/formatters';
 import { formatPostingTypeLabel, isPostingApplicationOpen } from '@/lib/postingModule';
-import { downloadCsvTable, downloadExcelTable } from '@/lib/spreadsheetExport';
+import { downloadExcelTable } from '@/lib/spreadsheetExport';
 import AdminListScopeFilters, { type DateRangeValue } from '@/components/admin/AdminListScopeFilters';
 import { PostingTypeBadge } from '@/components/ui/status-badge';
 import type {
@@ -111,7 +111,7 @@ export default function PostingsManagement() {
   >(null);
   const [pendingRepublish, setPendingRepublish] = useState<ApiPostingListItem | null>(null);
   const deferredSearch = useDeferredValue(searchTerm);
-  const postingTypeOptions = usePostingTypeOptions();
+  const [page, setPage] = useState(1);
 
   const statsQuery = usePostings({
     limit: 100,
@@ -127,15 +127,21 @@ export default function PostingsManagement() {
     course: courseFilter || undefined,
     branch: branchFilter || undefined,
     academic_year: academicYearFilter === 'all' ? undefined : academicYearFilter,
-    date_from: dateRange.from ? dateRange.from.toISOString() : undefined,
-    date_to: dateRange.to ? dateRange.to.toISOString() : undefined,
+    date_from: toDateParam(dateRange.from),
+    date_to: toDateParam(dateRange.to),
   };
+
+  useEffect(() => { setPage(1); }, [
+    deferredSearch, statusFilter, postingTypeMasterId, instituteFilter, courseFilter,
+    branchFilter, academicYearFilter, dateRange.from, dateRange.to,
+  ]);
 
   const { sort_by, sort_order, onSort } = useServerSort<
     'title' | 'company' | 'posting_type' | 'status' | 'created_at'
-  >('created_at', 'desc');
+  >('created_at', 'desc', () => setPage(1));
   const postingsQuery = usePostings({
-    limit: 100,
+    page,
+    limit: 20,
     ...listFilters,
     sort_by,
     sort_order,
@@ -181,45 +187,47 @@ export default function PostingsManagement() {
   }
 
   const POSTING_EXPORT_HEADERS = [
-    'Company', 'Posting Title', 'Role', 'Posting Type', 'Academic Year', 'Bond',
-    'Min CGPA', 'Max Backlogs', 'Application Start', 'Application End',
-    'Package / Stipend', 'Status', 'Created On',
+    'Company Name', 'Academic Year', 'Bond Details', 'Minimum CGPA', 'Maximum Backlogs',
+    'Application Start Date', 'Application End Date', 'Posting Type', 'Role Name',
+    'Package Range', 'Stipend Range', 'Status',
   ];
 
   function postingExportRow(posting: ApiPostingListItem) {
     return [
       posting.company.name,
-      posting.title,
-      posting.role_name,
-      posting.type ? formatPostingTypeLabel(posting.type) : '',
       posting.academic_year ?? '',
       posting.bond_details ?? '',
       posting.min_cgpa,
       posting.max_backlogs,
       posting.application_start_date ? formatDate(posting.application_start_date) : '',
       posting.application_end_date ? formatDate(posting.application_end_date) : '',
-      posting.ctc || posting.stipend || '',
+      posting.type ? formatPostingTypeLabel(posting.type) : '',
+      posting.role_name,
+      posting.ctc ?? '',
+      posting.stipend ?? '',
       posting.status,
-      formatDate(posting.created_at),
     ];
   }
 
-  async function handleExport(exportFormat: 'csv' | 'excel') {
+  async function handleExport() {
     setIsExporting(true);
     try {
-      // Fetch the full matching set (the on-screen list is capped at 100) with the same filters.
-      const result = await postingService.getPostings({ ...listFilters, limit: 1000, page: 1, sort_by: 'created_at', sort_order: 'desc' });
-      const rows = (result.data ?? []).map(postingExportRow);
-      if (rows.length === 0) {
+      // Fetch the full matching set with the same filters. The backend caps `limit` at 100
+      // (paginationSchema), so page at 100 and loop until a short/empty page. postingService
+      // pagination doesn't normalize hasNext, so break on page-fullness rather than hasNext.
+      const all: ApiPostingListItem[] = [];
+      for (let page = 1; page <= 500; page++) {
+        const result = await postingService.getPostings({ ...listFilters, page, limit: 100, sort_by: 'created_at', sort_order: 'desc' });
+        const batch = result.data ?? [];
+        all.push(...batch);
+        if (batch.length < 100) break;
+      }
+      if (all.length === 0) {
         toast.info('No postings match the current filters.');
         return;
       }
-      if (exportFormat === 'excel') {
-        await downloadExcelTable(POSTING_EXPORT_HEADERS, rows, 'postings_export');
-      } else {
-        downloadCsvTable(POSTING_EXPORT_HEADERS, rows, 'postings_export');
-      }
-      toast.success(`Exported ${rows.length} posting(s).`);
+      await downloadExcelTable(POSTING_EXPORT_HEADERS, all.map(postingExportRow), 'postings_export');
+      toast.success(`Exported ${all.length} posting(s).`);
     } catch (error) {
       toast.error(getErrorMessage(error, 'Unable to export postings.'));
     } finally {
@@ -292,13 +300,9 @@ export default function PostingsManagement() {
             <p className="text-sm text-muted-foreground">Track the current status of your placement and internship postings.</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button variant="outline" disabled={isExporting} onClick={() => handleExport('csv')}>
-              {isExporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
-              Export CSV
-            </Button>
-            <Button variant="outline" disabled={isExporting} onClick={() => handleExport('excel')}>
-              {isExporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
-              Export Excel
+            <Button variant="outline" disabled={isExporting} onClick={() => handleExport()}>
+              {isExporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileSpreadsheet className="mr-2 h-4 w-4" />}
+              Export
             </Button>
             <Button onClick={() => navigate('/admin/postings/create')}>
               <Plus className="mr-2 h-4 w-4" />
@@ -371,19 +375,6 @@ export default function PostingsManagement() {
                 </SelectContent>
               </Select>
 
-              <Select value={postingTypeMasterId} onValueChange={setPostingTypeMasterId}>
-                <SelectTrigger className="w-full lg:w-56">
-                  <SelectValue placeholder="Posting Type" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All posting types</SelectItem>
-                  {postingTypeOptions.options.map((option) => (
-                    <SelectItem key={option.id} value={option.id}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
             </div>
 
             <AdminListScopeFilters
@@ -391,6 +382,7 @@ export default function PostingsManagement() {
               course={{ value: courseFilter, onChange: setCourseFilter }}
               branch={{ value: branchFilter, onChange: setBranchFilter }}
               academicYear={{ value: academicYearFilter, onChange: setAcademicYearFilter }}
+              postingType={{ value: postingTypeMasterId, onChange: setPostingTypeMasterId, bind: 'id' }}
               dateRange={{ value: dateRange, onChange: setDateRange }}
             />
           </CardContent>
@@ -517,6 +509,11 @@ export default function PostingsManagement() {
                 </Table>
               </div>
             )}
+            <ListPager
+              page={postingsQuery.data?.pagination.page ?? 1}
+              totalPages={postingsQuery.data?.pagination.totalPages ?? 1}
+              onPageChange={setPage}
+            />
           </CardContent>
         </Card>
 

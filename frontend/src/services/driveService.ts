@@ -3,6 +3,7 @@
  * Real API calls + mock data re-exports for gradual migration.
  */
 import { apiClient } from './apiClient';
+import { normalizePagination, type RawPagination } from '@/lib/pagination';
 import { parseApiErrorEnvelope, type ApiErrorDetail } from '@/lib/apiError';
 import type {
   ApiEventDetail,
@@ -79,10 +80,11 @@ function toQueryString(params: Record<string, unknown>): string {
 
 const eventApi = {
   getEvents: async (params: EventQueryParams = {}): Promise<PaginatedEvents> => {
-    const res = await apiClient.get<PaginatedEvents>(
+    const res = await apiClient.get<{ data: PaginatedEvents['data']; pagination: RawPagination }>(
       `/events${toQueryString(params as Record<string, unknown>)}`,
     );
-    return throwIfError(res);
+    const payload = throwIfError(res);
+    return { data: payload.data, pagination: normalizePagination(payload.pagination) };
   },
 
   getMyEvents: async (): Promise<PaginatedEvents> => {

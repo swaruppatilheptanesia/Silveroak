@@ -24,6 +24,7 @@ import {
 } from '@/components/ui/table';
 import { useMasterValues } from '@/hooks/use-master-api';
 import { usePostingTypeOptions } from '@/hooks/use-posting-type-options';
+import { filterPostingTypeOptionsByAcademicYear } from '@/lib/postingModule';
 import { 
   Download, 
   FileSpreadsheet, 
@@ -54,6 +55,7 @@ import {
   Megaphone
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { downloadCsvTable, downloadExcelTable, type SpreadsheetCellValue } from '@/lib/spreadsheetExport';
 import {
   useActivePostingsReport,
   useCompanyMasterReport,
@@ -135,7 +137,7 @@ const reportModules = [
     name: 'NOC & Documents',
     icon: FileText,
     reports: [
-      { id: 'noc-by-dept', name: 'NOC by Department / Batch', icon: Building2 },
+      { id: 'noc-by-dept', name: 'NOC by Branch / Batch', icon: Building2 },
       { id: 'noc-count', name: 'Internship / NOC Count', icon: FileText },
       { id: 'noc-listing', name: 'Internship / NOC Listing', icon: FileText },
     ]
@@ -227,7 +229,7 @@ export default function ReportsAnalytics() {
   
   // Student Report filters
   const [selectedInterest, setSelectedInterest] = useState('placement');
-  const [departmentFilter, setDepartmentFilter] = useState('all');
+  const [branchFilter, setBranchFilter] = useState('all');
   const [minCgpa, setMinCgpa] = useState('all');
   const [verifiedOnly, setVerifiedOnly] = useState(true);
   const [selectedStudents, setSelectedStudents] = useState<string[]>([]);
@@ -289,7 +291,7 @@ export default function ReportsAnalytics() {
     const source = interestedStudentsQuery.data?.students ?? [];
 
     return source.filter((student: any) => {
-      const matchesDepartment = departmentFilter === 'all' || student.department === departmentFilter;
+      const matchesBranch = branchFilter === 'all' || student.branch === branchFilter;
       const matchesVerified = !verifiedOnly || student.verification_status === 'verified';
 
       let matchesCgpa = true;
@@ -298,7 +300,7 @@ export default function ReportsAnalytics() {
       else if (minCgpa === '8+') matchesCgpa = cgpa >= 8;
       else if (minCgpa === '7+') matchesCgpa = cgpa >= 7;
 
-      return matchesDepartment && matchesVerified && matchesCgpa;
+      return matchesBranch && matchesVerified && matchesCgpa;
     }).map((student: any) => ({
       ...student,
       verificationStatus: student.verification_status,
@@ -307,7 +309,12 @@ export default function ReportsAnalytics() {
         backlog_count: Number(student.backlog_count ?? student.academicProfile?.backlog_count ?? 0),
       },
     }));
-  }, [departmentFilter, minCgpa, verifiedOnly, interestedStudentsQuery.data]);
+  }, [branchFilter, minCgpa, verifiedOnly, interestedStudentsQuery.data]);
+
+  const interestedBranchOptions = useMemo(
+    () => Array.from(new Set((interestedStudentsQuery.data?.students ?? []).map((s: any) => s.branch).filter(Boolean))).sort() as string[],
+    [interestedStudentsQuery.data],
+  );
 
   const eligibilityData = useMemo(() => {
     const rows = eligibilityQuery.data?.students ?? [];
@@ -338,8 +345,7 @@ export default function ReportsAnalytics() {
   }, [profileQuery.data]);
 
   const profileTotalStudents = profileQuery.data?.students?.length ?? 0;
-  const profileDepartments = profileQuery.data?.departments ?? [];
-  const studentDepartments = useMemo(() => profileDepartments.map((dept: any) => dept.department), [profileDepartments]);
+  const profileDepartments = profileQuery.data?.branches ?? [];
 
   const registrationData = registrationQuery.data?.summary ?? [];
   const registrationTotalStudents = registrationQuery.data?.total_students ?? profileTotalStudents;
@@ -503,10 +509,10 @@ export default function ReportsAnalytics() {
   }, [eligibilityData]);
 
   const eligibilityByDept = useMemo(() => {
-    const map = new Map<string, { department: string; total: number; eligible: number; conditional: number; notEligible: number }>();
+    const map = new Map<string, { branch: string; total: number; eligible: number; conditional: number; notEligible: number }>();
     eligibilityRows.forEach((student: any) => {
-      const dept = student.department || 'Unassigned';
-      const entry = map.get(dept) ?? { department: dept, total: 0, eligible: 0, conditional: 0, notEligible: 0 };
+      const dept = student.branch || 'Unassigned';
+      const entry = map.get(dept) ?? { branch: dept, total: 0, eligible: 0, conditional: 0, notEligible: 0 };
       entry.total += 1;
       if (student.eligibility_status === 'eligible') entry.eligible += 1;
       else if (student.eligibility_status === 'conditional') entry.conditional += 1;
@@ -538,103 +544,101 @@ export default function ReportsAnalytics() {
   };
 
   const handleExport = (reportType: string, format: 'csv' | 'excel') => {
-    let csvContent = '';
+    let headers: string[] = [];
+    let rows: SpreadsheetCellValue[][] = [];
     let filename = '';
 
     switch(reportType) {
-      case 'interested':
-        const interestedData = studentsWithInterest.filter(s => 
+      case 'interested': {
+        const interestedData = studentsWithInterest.filter(s =>
           selectedStudents.length === 0 || selectedStudents.includes(s.student_id)
         );
-        csvContent = `Name,Roll Number,Email,Department,CGPA,Profile Completion\n` +
-          interestedData.map(s => 
-            `${s.full_name},${s.roll_number},${s.email},${s.department},${s.academicProfile.cgpa},${s.profile_completion_percentage}%`
-          ).join('\n');
+        headers = ['Name', 'Roll Number', 'Email', 'Branch', 'CGPA', 'Profile Completion'];
+        rows = interestedData.map(s => [
+          s.full_name, s.roll_number, s.email, s.branch, s.academicProfile.cgpa, `${s.profile_completion_percentage}%`,
+        ]);
         filename = `${selectedInterest}_interested_list`;
         break;
+      }
       case 'eligibility':
-        csvContent = `Name,Enrollment Number,Department,CGPA,Backlogs,Status\n` +
-          eligibilityRows.map(s => {
-            const status = s.academicProfile.cgpa >= 7 && s.academicProfile.backlog_count === 0 ? 'Eligible'
-              : s.academicProfile.cgpa >= 6 && s.academicProfile.backlog_count <= 1 ? 'Conditional' : 'Not Eligible';
-            return `${s.full_name},${s.enrollment_number},${s.department},${s.academicProfile.cgpa},${s.academicProfile.backlog_count},${status}`;
-          }).join('\n');
+        headers = ['Name', 'Enrollment Number', 'Branch', 'CGPA', 'Backlogs', 'Status'];
+        rows = eligibilityRows.map(s => {
+          const status = s.academicProfile.cgpa >= 7 && s.academicProfile.backlog_count === 0 ? 'Eligible'
+            : s.academicProfile.cgpa >= 6 && s.academicProfile.backlog_count <= 1 ? 'Conditional' : 'Not Eligible';
+          return [s.full_name, s.enrollment_number, s.branch, s.academicProfile.cgpa, s.academicProfile.backlog_count, status];
+        });
         filename = 'eligibility_report';
         break;
       case 'profile':
-        csvContent = `Name,Enrollment Number,Department,Profile Completion\n` +
-          (profileQuery.data?.students ?? []).map((s: any) =>
-            `${s.full_name},${s.enrollment_number},${s.department},${s.profile_completion_percentage}%`
-          ).join('\n');
+        headers = ['Name', 'Enrollment Number', 'Branch', 'Profile Completion'];
+        rows = (profileQuery.data?.students ?? []).map((s: any) => [
+          s.full_name, s.enrollment_number, s.branch, `${s.profile_completion_percentage}%`,
+        ]);
         filename = 'profile_completeness_report';
         break;
       case 'registration':
-        csvContent = `Posting Type,Total,Verified,Pending,Rejected\n` +
-          registrationData.map(r =>
-            `${r.label ?? r.interest_type},${r.count},${r.verified},${r.pending},${r.rejected}`
-          ).join('\n');
+        headers = ['Posting Type', 'Total', 'Verified', 'Pending', 'Rejected'];
+        rows = registrationData.map(r => [r.label ?? r.interest_type, r.count, r.verified, r.pending, r.rejected]);
         filename = 'registration_summary';
         break;
       case 'company-master':
-        csvContent = `Company Name,Industry,Address,Website,Status,Classification\n` +
-          filteredCompanies.map(c => 
-            `${c.name},${c.industry},"${c.address}",${c.website},${c.status},${c.classification}`
-          ).join('\n');
+        headers = ['Company Name', 'Industry', 'Address', 'Website', 'Status', 'Classification'];
+        rows = filteredCompanies.map(c => [c.name, c.industry, c.address, c.website, c.status, c.classification]);
         filename = 'company_master_list';
         break;
       case 'recruiter-list':
-        csvContent = `Recruiter Name,Email,Phone,Designation,Company,Verification Status\n` +
-          recruiters.map((r: any) => 
-            `${r.name},${r.email},${r.phone},${r.designation},${r.companyName},${r.verificationStatus}`
-          ).join('\n');
+        headers = ['Recruiter Name', 'Email', 'Phone', 'Designation', 'Company', 'Verification Status'];
+        rows = recruiters.map((r: any) => [r.name, r.email, r.phone, r.designation, r.companyName, r.verificationStatus]);
         filename = 'recruiter_list';
         break;
       case 'engagement-history':
-        csvContent = `Company,Type,Academic Year,Date,Students Hired,Package,Remarks\n` +
-          engagements.map((e: any) => {
-            const company = companies.find((c: any) => c.id === e.companyId || c.company_id === e.companyId);
-            return `${company?.name || 'Unknown'},${e.visitorType},${e.academicYear},${new Date(e.date).toLocaleDateString('en-IN')},${e.studentsHired || '-'},${e.packagesOffered || '-'},"${e.remarks || ''}"`;
-          }).join('\n');
+        headers = ['Company', 'Type', 'Academic Year', 'Date', 'Students Hired', 'Package', 'Remarks'];
+        rows = engagements.map((e: any) => {
+          const company = companies.find((c: any) => c.id === e.companyId || c.company_id === e.companyId);
+          return [company?.name || 'Unknown', e.visitorType, e.academicYear, new Date(e.date).toLocaleDateString('en-IN'), e.studentsHired || '-', e.packagesOffered || '-', e.remarks || ''];
+        });
         filename = 'engagement_history';
         break;
       case 'company-classification':
-        csvContent = `Company Name,Industry,Status,Classification,Internal Remarks\n` +
-          companies.map((c: any) => 
-            `${c.name},${c.industry},${c.status},${c.classification},"${c.internalRemarks || ''}"`
-          ).join('\n');
+        headers = ['Company Name', 'Industry', 'Status', 'Classification', 'Internal Remarks'];
+        rows = companies.map((c: any) => [c.name, c.industry, c.status, c.classification, c.internalRemarks || '']);
         filename = 'company_classification_report';
         break;
       case 'active-postings':
-        csvContent = `Title,Company,Type,Role,Location,Work Mode,Status,Application Start,Application End\n` +
-          activePostings.map(p => 
-            `"${p.title}",${p.companyName},${getPostingTypeLabel(p.type)},${p.roleName},"${p.location}",${getWorkModeLabel(p.workMode)},${p.status},${p.applicationStartDate},${p.applicationEndDate}`
-          ).join('\n');
+        headers = ['Title', 'Company', 'Type', 'Role', 'Location', 'Work Mode', 'Status', 'Application Start', 'Application End'];
+        rows = activePostings.map(p => [p.title, p.companyName, getPostingTypeLabel(p.type), p.roleName, p.location, getWorkModeLabel(p.workMode), p.status, p.applicationStartDate, p.applicationEndDate]);
         filename = 'active_postings_report';
         break;
       case 'posting-history':
-        csvContent = `Title,Company,Type,Academic Year,Role,Status,Created Date,Published Date,Closed Date\n` +
-          filteredPostingHistory.map(p => 
-            `"${p.title}",${p.companyName},${getPostingTypeLabel(p.type)},${p.academicYear},${p.roleName},${p.status},${p.createdAt},${p.publishedAt || '-'},${p.closedAt || '-'}`
-          ).join('\n');
+        headers = ['Title', 'Company', 'Type', 'Academic Year', 'Role', 'Status', 'Created Date', 'Published Date', 'Closed Date'];
+        rows = filteredPostingHistory.map(p => [p.title, p.companyName, getPostingTypeLabel(p.type), p.academicYear, p.roleName, p.status, p.createdAt, p.publishedAt || '-', p.closedAt || '-']);
         filename = `posting_history_${postingYearFilter === 'all' ? 'all_years' : postingYearFilter}`;
         break;
       case 'posting-summary':
-        csvContent = `Category,Total,Draft,Published,Closed\n` +
-          `Placements (Jobs),${postingSummaryData.jobs.total},${postingSummaryData.jobs.draft},${postingSummaryData.jobs.published},${postingSummaryData.jobs.closed}\n` +
-          `Internships,${postingSummaryData.internships.total},${postingSummaryData.internships.draft},${postingSummaryData.internships.published},${postingSummaryData.internships.closed}\n` +
-          `Stipend Internships,${postingSummaryData.stipendInternships.total},${postingSummaryData.stipendInternships.draft},${postingSummaryData.stipendInternships.published},${postingSummaryData.stipendInternships.closed}`;
+        headers = ['Category', 'Total', 'Draft', 'Published', 'Closed'];
+        rows = [
+          ['Placements (Jobs)', postingSummaryData.jobs.total, postingSummaryData.jobs.draft, postingSummaryData.jobs.published, postingSummaryData.jobs.closed],
+          ['Internships', postingSummaryData.internships.total, postingSummaryData.internships.draft, postingSummaryData.internships.published, postingSummaryData.internships.closed],
+          ['Stipend Internships', postingSummaryData.stipendInternships.total, postingSummaryData.stipendInternships.draft, postingSummaryData.stipendInternships.published, postingSummaryData.stipendInternships.closed],
+        ];
         filename = 'internship_vs_placement_summary';
         break;
     }
-    
-    const blob = new Blob([csvContent], { 
-      type: format === 'csv' ? 'text/csv' : 'application/vnd.ms-excel' 
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${filename}.${format === 'csv' ? 'csv' : 'xlsx'}`;
-    a.click();
+
+    if (rows.length === 0) {
+      toast({
+        title: 'Nothing to export',
+        description: 'There are no records for this report with the current filters.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    if (format === 'csv') {
+      downloadCsvTable(headers, rows, filename);
+    } else {
+      void downloadExcelTable(headers, rows, filename);
+    }
 
     toast({
       title: "Report Exported",
@@ -800,14 +804,14 @@ export default function ReportsAnalytics() {
                 </CardHeader>
                 <CardContent>
                   <div className="flex flex-wrap gap-4">
-                    <Select value={departmentFilter} onValueChange={setDepartmentFilter}>
+                    <Select value={branchFilter} onValueChange={setBranchFilter}>
                       <SelectTrigger className="w-[200px]">
-                        <SelectValue placeholder="Department" />
+                        <SelectValue placeholder="Branch" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="all">All Departments</SelectItem>
-                        {studentDepartments.map((dept) => (
-                          <SelectItem key={dept} value={dept}>{dept}</SelectItem>
+                        <SelectItem value="all">All Branches</SelectItem>
+                        {interestedBranchOptions.map((branch) => (
+                          <SelectItem key={branch} value={branch}>{branch}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
@@ -877,7 +881,7 @@ export default function ReportsAnalytics() {
                             />
                           </TableHead>
                           <TableHead>Student</TableHead>
-                          <TableHead>Department</TableHead>
+                          <TableHead>Branch</TableHead>
                           <TableHead>CGPA</TableHead>
                           <TableHead>Contact</TableHead>
                           <TableHead>Status</TableHead>
@@ -898,7 +902,7 @@ export default function ReportsAnalytics() {
                                 <p className="text-sm text-muted-foreground">{student.roll_number}</p>
                               </div>
                             </TableCell>
-                            <TableCell className="text-sm">{student.department}</TableCell>
+                            <TableCell className="text-sm">{student.branch}</TableCell>
                             <TableCell>
                               <Badge variant="outline">{student.academicProfile.cgpa.toFixed(2)}</Badge>
                             </TableCell>
@@ -997,12 +1001,12 @@ export default function ReportsAnalytics() {
                 </Card>
               </div>
 
-              {/* Department-wise Breakdown */}
+              {/* Branch-wise Breakdown */}
               <Card>
                 <CardHeader className="flex flex-row items-center justify-between">
                   <div>
-                    <CardTitle>Department-wise Eligibility</CardTitle>
-                    <CardDescription>Eligible share of students by department</CardDescription>
+                    <CardTitle>Branch-wise Eligibility</CardTitle>
+                    <CardDescription>Eligible share of students by branch</CardDescription>
                   </div>
                   <div className="flex gap-2">
                     <Button variant="outline" onClick={() => handleExport('eligibility', 'csv')}>
@@ -1019,9 +1023,9 @@ export default function ReportsAnalytics() {
                   ) : (
                     <div className="space-y-5">
                       {eligibilityByDept.map((dept) => (
-                        <div key={dept.department} className="space-y-2">
+                        <div key={dept.branch} className="space-y-2">
                           <div className="flex justify-between text-sm">
-                            <span className="font-medium">{dept.department}</span>
+                            <span className="font-medium">{dept.branch}</span>
                             <span className="text-muted-foreground">
                               {dept.eligibleRate}% eligible ({dept.total} students)
                             </span>
@@ -1071,12 +1075,12 @@ export default function ReportsAnalytics() {
                 ))}
               </div>
 
-              {/* Department-wise Breakdown */}
+              {/* Branch-wise Breakdown */}
               <Card>
                 <CardHeader className="flex flex-row items-center justify-between">
                   <div>
-                    <CardTitle>Department-wise Profile Completion</CardTitle>
-                    <CardDescription>Average profile completion by department</CardDescription>
+                    <CardTitle>Branch-wise Profile Completion</CardTitle>
+                    <CardDescription>Average profile completion by branch</CardDescription>
                   </div>
                   <div className="flex gap-2">
                     <Button variant="outline" onClick={() => handleExport('profile', 'csv')}>
@@ -1091,9 +1095,9 @@ export default function ReportsAnalytics() {
                   <div className="space-y-4">
                     {profileDepartments.slice(0, 6).map((dept: any) => {
                       return (
-                        <div key={dept.department} className="space-y-2">
+                        <div key={dept.branch} className="space-y-2">
                           <div className="flex justify-between text-sm">
-                            <span className="font-medium">{dept.department}</span>
+                            <span className="font-medium">{dept.branch}</span>
                             <span className="text-muted-foreground">{dept.avg_completion}% avg ({dept.count} students)</span>
                           </div>
                           <Progress value={dept.avg_completion} className="h-2" />
@@ -1822,9 +1826,9 @@ export default function ReportsAnalytics() {
                       contentClassName="w-[min(28rem,calc(100vw-2rem))]"
                     />
 
-                    <Select value={postingTypeFilter} onValueChange={setPostingTypeFilter} disabled={reportPostingTypesLoading}>
+                    <Select value={postingTypeFilter} onValueChange={setPostingTypeFilter} disabled={reportPostingTypesLoading || !postingYearFilter}>
                       <SelectTrigger className="w-[180px]">
-                        <SelectValue placeholder="Posting Type" />
+                        <SelectValue placeholder={!postingYearFilter ? 'Select year first' : 'Posting Type'} />
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="all">All Types</SelectItem>
@@ -1833,7 +1837,7 @@ export default function ReportsAnalytics() {
                             No posting types defined
                           </SelectItem>
                         ) : (
-                          reportPostingTypeOptions.map((option) => (
+                          filterPostingTypeOptionsByAcademicYear(reportPostingTypeOptions, postingYearFilter).map((option) => (
                             <SelectItem key={option.value} value={option.value}>
                               {option.label}
                             </SelectItem>

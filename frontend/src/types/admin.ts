@@ -379,6 +379,7 @@ export interface ApiAdminStudent {
   institute_name: string | null;
   course_name: string | null;
   department: string;
+  branch: string | null;
   batch_year: string;
   date_of_birth: string | null;
   profile_photo_url: string | null;
@@ -479,7 +480,6 @@ export interface PaginatedAdminStudents {
 
 export interface AdminStudentQueryParams {
   search?: string;
-  department?: string;
   batch?: string;
   verification_status?: AdminStudentVerificationStatus;
   min_cgpa?: number;
@@ -495,7 +495,7 @@ export interface AdminStudentQueryParams {
   date_to?: string;
   page?: number;
   limit?: number;
-  sort_by?: 'full_name' | 'department' | 'profile_completion_percentage' | 'verification_status' | 'batch' | 'created_at' | 'updated_at';
+  sort_by?: 'full_name' | 'branch' | 'profile_completion_percentage' | 'verification_status' | 'batch' | 'created_at' | 'updated_at';
   sort_order?: 'asc' | 'desc';
 }
 
@@ -552,6 +552,7 @@ export interface ApiAdminPortfolioRecord {
   student_name: string;
   enrollment_number: string;
   department: string;
+  branch: string | null;
   batch: string;
   status: 'draft' | 'published';
   project_count: number;
@@ -562,7 +563,6 @@ export interface ApiAdminPortfolioRecord {
 
 export interface AdminPortfolioQueryParams {
   search?: string;
-  department?: string;
   status?: 'draft' | 'published';
   institute?: string;
   course?: string;
@@ -591,6 +591,7 @@ export interface ApiAdminSelectionRecord {
   student_name: string;
   enrollment_number: string;
   department: string;
+  branch?: string | null;
   batch: string;
   institute?: string | null;
   course?: string | null;
@@ -619,7 +620,6 @@ export interface SelectionDatabaseQueryParams {
   search?: string;
   type?: AdminSelectionType;
   posting_type?: ApiPostingType;
-  department?: string;
   batch?: string;
   company?: string;
   outcome?: AdminSelectionOutcome;
@@ -657,7 +657,6 @@ export interface ApiInterestSummaryItem {
 export interface InterestRegistrationsQueryParams {
   interest_type?: string;
   posting_type?: string;
-  department?: string;
   search?: string;
   status?: InterestRegistrationStatus;
   // FILTER COUNTER EXPORT — student-scope + registration date range
@@ -681,6 +680,7 @@ export interface ApiRecentInterestRegistration {
   student_name: string;
   enrollment_number: string;
   department: string;
+  branch: string | null;
   /** Posting-type value string (humanize on render). */
   interest_type: string;
   status: InterestRegistrationStatus;

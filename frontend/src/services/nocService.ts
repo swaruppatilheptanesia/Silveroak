@@ -3,6 +3,7 @@
  * Real API calls + mock data re-exports for gradual migration.
  */
 import { apiClient } from './apiClient';
+import { normalizePagination, type RawPagination } from '@/lib/pagination';
 import { parseApiErrorEnvelope, type ApiErrorDetail } from '@/lib/apiError';
 import type {
   ApiNocMyItem,
@@ -15,7 +16,9 @@ import type {
   RejectNocInput,
   NocOfferLetterUpload,
   NocSupportingDocumentUpload,
+  NocTerminationLetterUpload,
   NocFieldSuggestions,
+  FacultyNocSummary,
 } from '@/types/noc';
 
 // ── Re-export mock data for gradual migration ──────────
@@ -138,6 +141,28 @@ const nocApi = {
     return response.json();
   },
 
+  uploadTerminationLetter: async (file: File): Promise<NocTerminationLetterUpload> => {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const baseUrl = import.meta.env.VITE_API_BASE_URL || '/api';
+    const token = (await import('./apiClient')).tokenManager.getAccessToken();
+
+    const response = await fetch(`${baseUrl}/noc/termination-letter`, {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const errBody = await response.json().catch(() => ({}));
+      const parsed = parseApiErrorEnvelope(errBody, 'Upload failed');
+      throw new NocApiError(parsed.message, response.status, parsed.code, parsed.details);
+    }
+
+    return response.json();
+  },
+
   // Student: company / city / designation suggestions for the create form
   getFieldSuggestions: async (): Promise<NocFieldSuggestions> => {
     const res = await apiClient.get<NocFieldSuggestions>('/noc/field-suggestions');
@@ -146,7 +171,14 @@ const nocApi = {
 
   // Admin: list all NOCs (paginated)
   getNocs: async (params: NocQueryParams = {}): Promise<PaginatedNocs> => {
-    const res = await apiClient.get<PaginatedNocs>(`/noc${toQueryString(params)}`);
+    const res = await apiClient.get<{ data: PaginatedNocs['data']; pagination: RawPagination }>(`/noc${toQueryString(params as Record<string, unknown>)}`);
+    const payload = throwIfError(res);
+    return { data: payload.data, pagination: normalizePagination(payload.pagination) };
+  },
+
+  // Faculty: department-wide NOC stat-card counts
+  getFacultyNocSummary: async (): Promise<FacultyNocSummary> => {
+    const res = await apiClient.get<FacultyNocSummary>('/noc/summary');
     return throwIfError(res);
   },
 

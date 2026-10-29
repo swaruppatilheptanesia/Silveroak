@@ -134,6 +134,7 @@ export interface PaginatedAnnouncements {
 export interface AnnouncementQueryParams {
   status?: AnnouncementStatus;
   priority?: AnnouncementPriority;
+  search?: string;
   page?: number;
   limit?: number;
   sort_by?: 'title' | 'priority' | 'status' | 'published_at' | 'created_at';

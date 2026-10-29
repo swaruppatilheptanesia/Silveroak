@@ -30,7 +30,6 @@ import {
 } from '@/components/ui/dialog';
 import {
   Search,
-  Download,
   FileSpreadsheet,
   Eye,
   AlertTriangle,
@@ -45,14 +44,14 @@ import { PostingTypeBadge } from '@/components/ui/status-badge';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { isProfileIncomplete, calculateEligibility, MIN_PROFILE_COMPLETION } from '@/lib/validations';
 import { VERIFICATION_STATUS_CONFIG } from '@/lib/constants';
-import { formatCGPA, formatLPA } from '@/lib/formatters';
+import { formatCGPA, formatLPA, toDateParam } from '@/lib/formatters';
 import { resolveBackendAssetUrl } from '@/lib/studentModule';
-import { useAdminDepartmentOptions, useAdminStudents } from '@/hooks/use-admin-api';
+import { useAdminStudents } from '@/hooks/use-admin-api';
 import { usePostingTypeOptions } from '@/hooks/use-posting-type-options';
 import { useCompanies } from '@/hooks/use-employer-api';
 import { useToast } from '@/hooks/use-toast';
 import { adminService } from '@/services/adminService';
-import { downloadCsvTable, downloadExcelTable, type SpreadsheetCellValue } from '@/lib/spreadsheetExport';
+import { downloadExcelTable, type SpreadsheetCellValue } from '@/lib/spreadsheetExport';
 import AdminListScopeFilters, { type DateRangeValue } from '@/components/admin/AdminListScopeFilters';
 import type {
   AdminStudentQueryParams,
@@ -320,7 +319,7 @@ function studentExportRow(student: ApiAdminStudent): SpreadsheetCellValue[] {
     student.enrollment_number,
     student.institute_name ?? '',
     student.course_name ?? '',
-    student.department ?? '',
+    student.branch ?? '',
     student.current_semester ?? '',
     formatCGPA(student.academicProfile.cgpa, ''),
     student.academicProfile.twelfth_percentage ?? '',
@@ -337,7 +336,6 @@ function studentExportRow(student: ApiAdminStudent): SpreadsheetCellValue[] {
 export default function StudentListTab() {
   const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState('');
-  const [departmentFilter, setDepartmentFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState<AdminStudentVerificationStatus | 'all'>('all');
   const [cgpaFilter, setCgpaFilter] = useState('all');
   const [postingTypeFilter, setPostingTypeFilter] = useState('all');
@@ -349,7 +347,7 @@ export default function StudentListTab() {
   const [dateRange, setDateRange] = useState<DateRangeValue>({ from: undefined, to: undefined });
   const [currentPage, setCurrentPage] = useState(1);
   const { sort_by, sort_order, onSort } = useServerSort<
-    'full_name' | 'department' | 'profile_completion_percentage' | 'verification_status' | 'created_at'
+    'full_name' | 'branch' | 'profile_completion_percentage' | 'verification_status' | 'created_at'
   >('created_at', 'desc', () => setCurrentPage(1));
   const [selectedStudent, setSelectedStudent] = useState<ApiAdminStudent | null>(null);
   const [isExporting, setIsExporting] = useState(false);
@@ -372,7 +370,6 @@ export default function StudentListTab() {
       page: currentPage,
       limit: ITEMS_PER_PAGE,
       search: searchQuery || undefined,
-      department: departmentFilter === 'all' ? undefined : departmentFilter,
       verification_status: statusFilter === 'all' ? undefined : statusFilter,
       posting_type_master_id: postingTypeFilter === 'all' ? undefined : postingTypeFilter,
       institute: instituteFilter || undefined,
@@ -380,27 +377,25 @@ export default function StudentListTab() {
       branch: branchFilter || undefined,
       semester: semesterFilter === 'all' ? undefined : semesterFilter,
       company_id: companyFilter === 'all' ? undefined : companyFilter,
-      date_from: dateRange.from ? dateRange.from.toISOString() : undefined,
-      date_to: dateRange.to ? dateRange.to.toISOString() : undefined,
+      date_from: toDateParam(dateRange.from),
+      date_to: toDateParam(dateRange.to),
       ...cgpaParams,
       sort_by,
       sort_order,
     };
-  }, [branchFilter, cgpaFilter, companyFilter, courseFilter, currentPage, dateRange.from, dateRange.to, departmentFilter, instituteFilter, postingTypeFilter, searchQuery, semesterFilter, statusFilter, sort_by, sort_order]);
+  }, [branchFilter, cgpaFilter, companyFilter, courseFilter, currentPage, dateRange.from, dateRange.to, instituteFilter, postingTypeFilter, searchQuery, semesterFilter, statusFilter, sort_by, sort_order]);
 
   const studentsQuery = useAdminStudents(studentsParams);
-  const departmentOptionsQuery = useAdminDepartmentOptions();
   const students = studentsQuery.data?.data ?? [];
   const totalStudents = studentsQuery.data?.pagination.total ?? 0;
   const totalPages = studentsQuery.data?.pagination.totalPages ?? 1;
-  const departmentOptions = departmentOptionsQuery.data ?? [];
 
   async function collectAllStudents(): Promise<ApiAdminStudent[]> {
     const { page: _page, limit: _limit, ...filters } = studentsParams;
     const all: ApiAdminStudent[] = [];
     let page = 1;
     for (;;) {
-      const res = await adminService.getStudents({ ...filters, page, limit: 200 });
+      const res = await adminService.getStudents({ ...filters, page, limit: 100 });
       all.push(...res.data);
       if (!res.pagination?.hasNext || res.data.length === 0) break;
       page += 1;
@@ -408,7 +403,7 @@ export default function StudentListTab() {
     return all;
   }
 
-  const handleExport = async (format: 'csv' | 'excel') => {
+  const handleExport = async () => {
     setIsExporting(true);
     try {
       const all = await collectAllStudents();
@@ -417,8 +412,7 @@ export default function StudentListTab() {
         return;
       }
       const rows = all.map(studentExportRow);
-      if (format === 'csv') downloadCsvTable(EXPORT_HEADERS, rows, 'students_export');
-      else await downloadExcelTable(EXPORT_HEADERS, rows, 'students_export');
+      await downloadExcelTable(EXPORT_HEADERS, rows, 'students_export');
       toast({ title: 'Export ready', description: `${all.length} students exported.` });
     } catch {
       toast({ title: 'Export failed', description: 'Could not export students. Try again.', variant: 'destructive' });
@@ -444,25 +438,6 @@ export default function StudentListTab() {
                 className="pl-10"
               />
             </div>
-            <Select
-              value={departmentFilter}
-              onValueChange={(value) => {
-                setDepartmentFilter(value);
-                setCurrentPage(1);
-              }}
-            >
-              <SelectTrigger className="w-full md:w-[200px]">
-                <SelectValue placeholder="Department" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Departments</SelectItem>
-                {departmentOptions.map((department) => (
-                  <SelectItem key={department} value={department}>
-                    {department}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
             <Select
               value={statusFilter}
               onValueChange={(value) => {
@@ -524,11 +499,8 @@ export default function StudentListTab() {
                 )}
               </SelectContent>
             </Select>
-            <Button variant="outline" onClick={() => handleExport('csv')} disabled={isExporting || totalStudents === 0}>
-              <Download className="mr-2 h-4 w-4" /> CSV
-            </Button>
-            <Button variant="outline" onClick={() => handleExport('excel')} disabled={isExporting || totalStudents === 0}>
-              <FileSpreadsheet className="mr-2 h-4 w-4" /> Excel
+            <Button variant="outline" onClick={() => handleExport()} disabled={isExporting || totalStudents === 0}>
+              <FileSpreadsheet className="mr-2 h-4 w-4" /> Export
             </Button>
           </div>
 
@@ -569,7 +541,7 @@ export default function StudentListTab() {
             <TableHeader>
               <TableRow>
                 <SortableTableHead label="Student" columnKey="full_name" sortBy={sort_by} sortOrder={sort_order} onSort={onSort} />
-                <SortableTableHead label="Department" columnKey="department" sortBy={sort_by} sortOrder={sort_order} onSort={onSort} />
+                <SortableTableHead label="Branch" columnKey="branch" sortBy={sort_by} sortOrder={sort_order} onSort={onSort} />
                 <TableHead>CGPA</TableHead>
                 <SortableTableHead label="Profile" columnKey="profile_completion_percentage" sortBy={sort_by} sortOrder={sort_order} onSort={onSort} />
                 <SortableTableHead label="Status" columnKey="verification_status" sortBy={sort_by} sortOrder={sort_order} onSort={onSort} />
@@ -619,7 +591,7 @@ export default function StudentListTab() {
                         </div>
                       </TableCell>
                       <TableCell>
-                        <span className="text-sm">{student.department}</span>
+                        <span className="text-sm">{student.branch ?? '—'}</span>
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-1">
@@ -816,8 +788,8 @@ export default function StudentListTab() {
                   <p className="font-medium">{selectedStudent.mobile || '—'}</p>
                 </div>
                 <div>
-                  <p className="text-sm text-muted-foreground">Department</p>
-                  <p className="font-medium">{selectedStudent.department}</p>
+                  <p className="text-sm text-muted-foreground">Branch</p>
+                  <p className="font-medium">{selectedStudent.branch ?? '—'}</p>
                 </div>
                 <div>
                   <p className="text-sm text-muted-foreground">Batch</p>

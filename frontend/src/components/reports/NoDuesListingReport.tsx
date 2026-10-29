@@ -37,11 +37,12 @@ export default function NoDuesListingReport() {
   const records: any[] = data?.records ?? [];
 
   const headers = [
-    'Passing Year', 'Enrollment No', 'Student Name', 'Institute', 'Course', 'Branch', 'Semester', 'Contact', 'Email',
+    'Passing Year', 'Passout Date', 'Enrollment No', 'Student Name', 'Institute', 'Course', 'Branch', 'Semester', 'Contact', 'Email',
     'No-Due Type', 'Uploaded Document', 'Student Photo', 'Admission Year', 'Batch', 'No-Due Date',
   ];
   const exportRows = records.map((row) => [
-    row.passing_year, row.enrollment_number, row.student_name, row.institute, row.course, row.branch, row.semester,
+    row.passing_year, row.pass_out_date ? formatDate(row.pass_out_date) : '—',
+    row.enrollment_number, row.student_name, row.institute, row.course, row.branch, row.semester,
     row.contact, row.email, reasonLabel(row.exit_reason),
     row.proof_url ? resolveBackendAssetUrl(row.proof_url) : '—',
     row.student_photo_url ? resolveBackendAssetUrl(row.student_photo_url) : '—',
@@ -78,6 +79,7 @@ export default function NoDuesListingReport() {
                   records.map((row, index) => (
                     <TableRow key={index}>
                       <TableCell className="whitespace-nowrap">{fmt(row.passing_year)}</TableCell>
+                      <TableCell className="whitespace-nowrap">{row.pass_out_date ? formatDate(row.pass_out_date) : '—'}</TableCell>
                       <TableCell>{fmt(row.enrollment_number)}</TableCell>
                       <TableCell className="font-medium whitespace-nowrap">{fmt(row.student_name)}</TableCell>
                       <TableCell>{fmt(row.institute)}</TableCell>

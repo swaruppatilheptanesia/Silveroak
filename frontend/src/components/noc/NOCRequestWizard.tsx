@@ -41,6 +41,7 @@ import {
   useNocFieldSuggestions,
   useUploadNocOfferLetter,
   useUploadNocSupportingDocument,
+  useUploadNocTerminationLetter,
 } from '@/hooks/use-noc-api';
 import { useMasterValues } from '@/hooks/use-master-api';
 import { useStudentInterests, useStudentProfile } from '@/hooks/use-student-api';
@@ -74,7 +75,7 @@ interface NOCRequestWizardProps {
 
 interface FormState {
   noc_type: NOCType;
-  internship_type: 'internship' | 'placement' | '';
+  internship_type: boolean;
   program: NOCProgram | '';
   placement_source: PlacementSource;
   drive_id: string;
@@ -100,12 +101,17 @@ interface FormState {
   end_date: string;
   offer_letter_url: string;
   declaration: boolean;
+  // Re-issue
+  request_reissue: boolean;
+  previous_noc_id: string;
+  company_change_reason: string;
+  termination_letter_url: string;
 }
 
 type FormErrors = Partial<Record<keyof FormState, string>>;
 
 const NOC_STEP_FIELDS: Record<number, (keyof FormState)[]> = {
-  1: ['placement_source', 'program'],
+  1: ['previous_noc_id', 'company_change_reason', 'termination_letter_url', 'placement_source', 'program'],
   2: [
     'drive_id',
     'company_name',
@@ -150,7 +156,7 @@ function getErrorMessage(error: unknown, fallback = 'Something went wrong') {
 function createInitialState(): FormState {
   return {
     noc_type: 'internship',
-    internship_type: '',
+    internship_type: false,
     program: '',
     placement_source: 'self_sourced',
     drive_id: '',
@@ -176,6 +182,10 @@ function createInitialState(): FormState {
     end_date: '',
     offer_letter_url: '',
     declaration: false,
+    request_reissue: false,
+    previous_noc_id: '',
+    company_change_reason: '',
+    termination_letter_url: '',
   };
 }
 
@@ -202,14 +212,31 @@ function validateNocForm(
   postingTypeValues: string[],
   issuedPostingTypes: Set<string>,
   hasSelectedOfferLetter: boolean,
+  hasSelectedTerminationLetter: boolean,
 ): FormErrors {
   const errors: FormErrors = {};
 
+  // Re-issue: a previous NOC, a reason for the company change, and a termination/relieving letter are required.
+  if (form.request_reissue) {
+    if (!form.previous_noc_id.trim()) {
+      errors.previous_noc_id = 'Select the previous NOC you are re-issuing.';
+    }
+    if (!form.company_change_reason.trim()) {
+      errors.company_change_reason = 'Reason for company change is required.';
+    }
+    if (!form.termination_letter_url.trim() && !hasSelectedTerminationLetter) {
+      errors.termination_letter_url = 'Termination / relieving letter is required.';
+    }
+  }
+
   if (!form.program.trim()) {
     errors.program = 'Posting type is required.';
-  } else if (postingTypeValues.length > 0 && !postingTypeValues.includes(form.program)) {
+  } else if (!form.request_reissue && postingTypeValues.length > 0 && !postingTypeValues.includes(form.program)) {
+    // A re-issue inherits the previous NOC's posting type (may be outside the student's current eligible
+    // list), so skip the master-membership check for re-issues.
     errors.program = 'Please choose a valid posting type from masters.';
-  } else if (issuedPostingTypes.has(normalizeMasterValue(form.program))) {
+  } else if (!form.request_reissue && issuedPostingTypes.has(normalizeMasterValue(form.program))) {
+    // A re-issue is precisely for a posting type that already has an issued NOC, so skip this block then.
     errors.program = 'An NOC has already been issued for this posting type.';
   }
 
@@ -306,10 +333,6 @@ function validateNocForm(
     errors.start_date = 'Start date is required.';
   }
 
-  if (!form.internship_type) {
-    errors.internship_type = 'Please select an internship type.';
-  }
-
   if (form.start_date && form.end_date && new Date(form.end_date) < new Date(form.start_date)) {
     errors.end_date = 'End date must be on or after the start date.';
   }
@@ -352,6 +375,7 @@ export function NOCRequestWizard({ isOpen, onClose, onSuccess }: NOCRequestWizar
   const [form, setForm] = useState<FormState>(createInitialState());
   const [selectedOfferLetter, setSelectedOfferLetter] = useState<File | null>(null);
   const [selectedSupportingDocument, setSelectedSupportingDocument] = useState<File | null>(null);
+  const [selectedTerminationLetter, setSelectedTerminationLetter] = useState<File | null>(null);
   const [companyNameOther, setCompanyNameOther] = useState(false);
   const [stateOther, setStateOther] = useState(false);
   const [cityOther, setCityOther] = useState(false);
@@ -359,10 +383,12 @@ export function NOCRequestWizard({ isOpen, onClose, onSuccess }: NOCRequestWizar
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const offerLetterInputRef = useRef<HTMLInputElement | null>(null);
   const supportingDocumentInputRef = useRef<HTMLInputElement | null>(null);
+  const terminationLetterInputRef = useRef<HTMLInputElement | null>(null);
   const stepContentRef = useRef<HTMLDivElement | null>(null);
   const createNoc = useCreateNoc();
   const uploadOfferLetter = useUploadNocOfferLetter();
   const uploadSupportingDocument = useUploadNocSupportingDocument();
+  const uploadTerminationLetter = useUploadNocTerminationLetter();
   const fieldSuggestionsQuery = useNocFieldSuggestions(isOpen);
   const myNocsQuery = useMyNocs();
   const studentProfileQuery = useStudentProfile();
@@ -396,6 +422,23 @@ export function NOCRequestWizard({ isOpen, onClose, onSuccess }: NOCRequestWizar
         .map((noc) => normalizeMasterValue(noc.program))
     );
   }, [myNocsQuery.data]);
+
+  // Re-issue can only target an ISSUED NOC (those carry a reference number). Only the currently ACTIVE
+  // issued record per number is a valid re-issue target.
+  const reissueableNocs = useMemo(
+    () => (myNocsQuery.data ?? []).filter(
+      (noc) => noc.status === 'issued' && !!noc.noc_number && noc.is_active !== false,
+    ),
+    [myNocsQuery.data],
+  );
+  const previousNocOptions = useMemo(
+    () => reissueableNocs.map((noc) => ({
+      value: noc.id,
+      label: `${noc.noc_number} · ${noc.company_name}`,
+      keywords: [noc.noc_number ?? '', noc.company_name],
+    })),
+    [reissueableNocs],
+  );
 
   const nocTypeOptions = useMemo(() => {
     const liveValues = nocTypeValuesQuery.data ?? [];
@@ -501,6 +544,13 @@ export function NOCRequestWizard({ isOpen, onClose, onSuccess }: NOCRequestWizar
     [companySuggestions],
   );
 
+  // Lookup by name (option value === company.name; names are deduped per tenant) so selecting an existing
+  // company can auto-populate its address + recruiter contact details.
+  const companyByName = useMemo(
+    () => new Map(companySuggestions.map((company) => [company.name, company])),
+    [companySuggestions],
+  );
+
   // Pinned to the top of the company search and always visible (even while typing) so a student can
   // always add a company that isn't in the suggestions list.
   const companyPinnedOptions = useMemo(
@@ -558,8 +608,9 @@ export function NOCRequestWizard({ isOpen, onClose, onSuccess }: NOCRequestWizar
       postingTypeOptions.map((option) => option.value),
       issuedPostingTypes,
       Boolean(selectedOfferLetter),
+      Boolean(selectedTerminationLetter),
     ),
-    [form, issuedPostingTypes, nocTypeOptions, postingTypeOptions, selectedOfferLetter],
+    [form, issuedPostingTypes, nocTypeOptions, postingTypeOptions, selectedOfferLetter, selectedTerminationLetter],
   );
 
   function getVisibleError(field: keyof FormState) {
@@ -606,6 +657,7 @@ export function NOCRequestWizard({ isOpen, onClose, onSuccess }: NOCRequestWizar
     setForm(createInitialState());
     setSelectedOfferLetter(null);
     setSelectedSupportingDocument(null);
+    setSelectedTerminationLetter(null);
     setCompanyNameOther(false);
     setStateOther(false);
     setCityOther(false);
@@ -616,6 +668,9 @@ export function NOCRequestWizard({ isOpen, onClose, onSuccess }: NOCRequestWizar
     }
     if (supportingDocumentInputRef.current) {
       supportingDocumentInputRef.current.value = '';
+    }
+    if (terminationLetterInputRef.current) {
+      terminationLetterInputRef.current.value = '';
     }
   }
 
@@ -689,9 +744,17 @@ export function NOCRequestWizard({ isOpen, onClose, onSuccess }: NOCRequestWizar
         supportingDocumentName = uploadedSupporting.supporting_document_name;
       }
 
+      let terminationLetterUrl: string | null = null;
+      let terminationLetterName: string | null = null;
+      if (form.request_reissue && selectedTerminationLetter) {
+        const uploadedTermination = await uploadTerminationLetter.mutateAsync(selectedTerminationLetter);
+        terminationLetterUrl = uploadedTermination.termination_letter_url;
+        terminationLetterName = uploadedTermination.termination_letter_name;
+      }
+
       await createNoc.mutateAsync({
         noc_type: form.noc_type,
-        internship_type: form.internship_type || null,
+        internship_type: form.internship_type ? 'internship_placement' : null,
         program: form.program as NOCProgram,
         placement_source: form.placement_source,
         drive_id: form.placement_source === 'university_drive' ? form.drive_id || null : null,
@@ -722,6 +785,11 @@ export function NOCRequestWizard({ isOpen, onClose, onSuccess }: NOCRequestWizar
         end_date: form.end_date || null,
         duration_weeks: durationWeeks,
         offer_letter_url: offerLetterUrl,
+        is_reissue: form.request_reissue,
+        previous_noc_id: form.request_reissue ? form.previous_noc_id || null : null,
+        reason_for_company_change: form.request_reissue ? form.company_change_reason.trim() || null : null,
+        termination_letter_url: terminationLetterUrl,
+        termination_letter_name: terminationLetterName,
       });
 
       toast.success('NOC request submitted successfully.');
@@ -795,6 +863,108 @@ export function NOCRequestWizard({ isOpen, onClose, onSuccess }: NOCRequestWizar
         <div ref={stepContentRef} className="min-h-0 flex-1 overflow-y-auto px-6">
           {currentStep === 1 && (
             <div className="space-y-6 py-6">
+              <div className="space-y-3 rounded-lg border p-4">
+                <div className="flex items-center gap-3">
+                  <Checkbox
+                    id="request-reissue"
+                    checked={form.request_reissue}
+                    onCheckedChange={(checked) => {
+                      const next = Boolean(checked);
+                      setForm((current) => ({
+                        ...current,
+                        request_reissue: next,
+                        // Clearing the checkbox drops the re-issue inputs.
+                        previous_noc_id: next ? current.previous_noc_id : '',
+                        company_change_reason: next ? current.company_change_reason : '',
+                        termination_letter_url: next ? current.termination_letter_url : '',
+                        // Re-issue inherits the previous NOC's posting type; enabling with one already
+                        // selected re-syncs it, disabling clears it so the normal path re-picks.
+                        program: next
+                          ? reissueableNocs.find((noc) => noc.id === current.previous_noc_id)?.program ??
+                            current.program
+                          : '',
+                      }));
+                      if (!next) {
+                        setSelectedTerminationLetter(null);
+                        if (terminationLetterInputRef.current) terminationLetterInputRef.current.value = '';
+                      }
+                    }}
+                  />
+                  <Label htmlFor="request-reissue" className="cursor-pointer flex-1 font-medium">
+                    Request for Re-Issued NOC
+                  </Label>
+                </div>
+
+                {form.request_reissue ? (
+                  <div className="space-y-4 pt-1">
+                    {previousNocOptions.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">
+                        You have no issued NOC to re-issue yet.
+                      </p>
+                    ) : null}
+                    <div className="space-y-2">
+                      <Label>
+                        <RequiredLabel>Previous NOC Request Number</RequiredLabel>
+                      </Label>
+                      <SearchableSelect
+                        options={previousNocOptions}
+                        value={form.previous_noc_id}
+                        onValueChange={(value) => {
+                          // A re-issue MUST keep the previous NOC's posting type — inherit its program
+                          // (identified by the selected previous NOC) and lock the Program field below.
+                          const chosen = reissueableNocs.find((noc) => noc.id === value);
+                          setForm((current) => ({
+                            ...current,
+                            previous_noc_id: value,
+                            program: chosen?.program ?? current.program,
+                          }));
+                        }}
+                        placeholder="Select the NOC to re-issue"
+                        searchPlaceholder="Search NOC number / company..."
+                        emptyMessage="No issued NOCs found."
+                        buttonClassName={getVisibleError('previous_noc_id') ? 'border-destructive' : undefined}
+                      />
+                      <FieldError message={getVisibleError('previous_noc_id')} />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>
+                        <RequiredLabel>Reason for Company Change</RequiredLabel>
+                      </Label>
+                      <Textarea
+                        value={form.company_change_reason}
+                        onChange={(event) => updateField('company_change_reason', event.target.value)}
+                        placeholder="Why are you changing the company?"
+                        className={getVisibleError('company_change_reason') ? 'border-destructive' : undefined}
+                      />
+                      <FieldError message={getVisibleError('company_change_reason')} />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>
+                        <RequiredLabel>Termination / Relieving Letter</RequiredLabel>
+                      </Label>
+                      <Input
+                        ref={terminationLetterInputRef}
+                        type="file"
+                        accept=".pdf,application/pdf"
+                        onChange={(event) => {
+                          const file = event.target.files?.[0] ?? null;
+                          setSelectedTerminationLetter(file);
+                          updateField('termination_letter_url', file ? file.name : '');
+                        }}
+                        className={getVisibleError('termination_letter_url') ? 'border-destructive' : undefined}
+                      />
+                      <p className="text-xs text-muted-foreground">PDF files only.</p>
+                      <FieldError message={getVisibleError('termination_letter_url')} />
+                      {selectedTerminationLetter ? (
+                        <p className="text-xs text-muted-foreground">Ready to upload: {selectedTerminationLetter.name}</p>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+
               <div className="space-y-3">
                 <Label className="text-base font-medium">
                   <RequiredLabel>Placement Source</RequiredLabel>
@@ -806,8 +976,9 @@ export function NOCRequestWizard({ isOpen, onClose, onSuccess }: NOCRequestWizar
                     setForm((current) => ({
                       ...current,
                       placement_source: nextValue,
-                      // Program options change with the source; clear so the user re-picks a valid one.
-                      program: '',
+                      // Program options change with the source; clear so the user re-picks a valid one —
+                      // but a re-issue inherits the previous NOC's posting type, so keep it then.
+                      program: current.request_reissue ? current.program : '',
                       drive_id: '',
                       selected_offer_id: '',
                       company_name: '',
@@ -844,24 +1015,35 @@ export function NOCRequestWizard({ isOpen, onClose, onSuccess }: NOCRequestWizar
                 <Label className="text-base font-medium">
                   <RequiredLabel>Program / Category</RequiredLabel>
                 </Label>
-                <SearchableSelect
-                  options={postingTypeOptions}
-                  value={form.program}
-                  onValueChange={(value) => updateField('program', value as NOCProgram)}
-                  placeholder="Select posting type"
-                  searchPlaceholder="Search posting type..."
-                  emptyMessage={
-                    form.placement_source === 'university_drive'
-                      ? 'No released offers found — use Self-Sourced instead.'
-                      : 'No posting type available for you — register interest from your Dashboard first.'
-                  }
-                  loadingMessage="Loading posting types..."
-                  isLoading={postingTypeLoading}
-                  disabled={postingTypeLoading}
-                  buttonClassName={getVisibleError('program') ? 'border-destructive' : undefined}
-                  contentClassName="w-[min(34rem,calc(100vw-2rem))]"
-                />
-                {noPostingTypesAvailable ? (
+                {form.request_reissue ? (
+                  <>
+                    <div className="flex h-10 items-center rounded-md border border-input bg-muted/40 px-3 text-sm text-muted-foreground">
+                      {form.program ? getNocProgramLabel(form.program) : 'Select the previous NOC above'}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Inherited from the previous NOC — a re-issue keeps the same Posting Type.
+                    </p>
+                  </>
+                ) : (
+                  <SearchableSelect
+                    options={postingTypeOptions}
+                    value={form.program}
+                    onValueChange={(value) => updateField('program', value as NOCProgram)}
+                    placeholder="Select posting type"
+                    searchPlaceholder="Search posting type..."
+                    emptyMessage={
+                      form.placement_source === 'university_drive'
+                        ? 'No released offers found — use Self-Sourced instead.'
+                        : 'No posting type available for you — register interest from your Dashboard first.'
+                    }
+                    loadingMessage="Loading posting types..."
+                    isLoading={postingTypeLoading}
+                    disabled={postingTypeLoading}
+                    buttonClassName={getVisibleError('program') ? 'border-destructive' : undefined}
+                    contentClassName="w-[min(34rem,calc(100vw-2rem))]"
+                  />
+                )}
+                {!form.request_reissue && noPostingTypesAvailable ? (
                   <p className="text-sm text-muted-foreground">
                     No posting type is available for you yet. Register interest in a posting type from
                     your Dashboard, then come back to raise the NOC.
@@ -882,7 +1064,7 @@ export function NOCRequestWizard({ isOpen, onClose, onSuccess }: NOCRequestWizar
                     <div className="grid gap-2 text-sm md:grid-cols-2">
                       <p><span className="text-muted-foreground">Name:</span> {studentProfile.student.full_name}</p>
                       <p><span className="text-muted-foreground">Enrollment:</span> {studentProfile.student.enrollment_number}</p>
-                      <p><span className="text-muted-foreground">Department:</span> {studentProfile.student.department}</p>
+                      <p><span className="text-muted-foreground">Branch:</span> {studentProfile.student.branch ?? studentProfile.student.department}</p>
                       <p><span className="text-muted-foreground">Semester:</span> {studentProfile.academic?.semester ?? '—'}</p>
                     </div>
                   ) : (
@@ -979,8 +1161,27 @@ export function NOCRequestWizard({ isOpen, onClose, onSuccess }: NOCRequestWizar
                           setCompanyNameOther(true);
                           updateField('company_name', '');
                         } else {
+                          // Existing company selected → auto-populate its details wherever available
+                          // (address/city/state/pan/gst + the picked recruiter's contact). Replaces the
+                          // company + contact block so switching companies fills cleanly.
+                          const selected = companyByName.get(value);
+                          const recruiter = selected?.recruiter ?? null;
                           setCompanyNameOther(false);
-                          updateField('company_name', value);
+                          setCityOther(false);
+                          setStateOther(Boolean(selected?.state) && !INDIAN_STATES.includes(selected!.state!));
+                          setForm((current) => ({
+                            ...current,
+                            company_name: value,
+                            company_address: selected?.address ?? '',
+                            company_city: selected?.city ?? '',
+                            company_state: selected?.state ?? '',
+                            company_pan: selected?.pan ?? '',
+                            company_gst: selected?.gst ?? '',
+                            contact_person_name: recruiter?.name ?? '',
+                            contact_person_designation: recruiter?.designation ?? '',
+                            contact_person_phone: recruiter?.phone ?? '',
+                            contact_person_email: recruiter?.email ?? '',
+                          }));
                         }
                       }}
                       placeholder="Select an existing company or choose Other"
@@ -1285,27 +1486,16 @@ export function NOCRequestWizard({ isOpen, onClose, onSuccess }: NOCRequestWizar
               </div>
 
               <div className="space-y-2">
-                <Label>
-                  <RequiredLabel>Internship Type</RequiredLabel>
-                </Label>
-                <RadioGroup
-                  value={form.internship_type}
-                  onValueChange={(value) => updateField('internship_type', value as FormState['internship_type'])}
-                  className="grid gap-3 sm:grid-cols-2"
-                >
-                  {([
-                    { value: 'internship', label: 'Internship' },
-                    { value: 'placement', label: 'Placement' },
-                  ] as const).map((option) => (
-                    <div key={option.value} className="flex items-center gap-3 rounded-lg border p-3">
-                      <RadioGroupItem value={option.value} id={`internship-type-${option.value}`} />
-                      <Label htmlFor={`internship-type-${option.value}`} className="cursor-pointer flex-1">
-                        {option.label}
-                      </Label>
-                    </div>
-                  ))}
-                </RadioGroup>
-                <FieldError message={getVisibleError('internship_type')} />
+                <div className="flex items-center gap-3 rounded-lg border p-3">
+                  <Checkbox
+                    id="internship-placement"
+                    checked={form.internship_type}
+                    onCheckedChange={(checked) => updateField('internship_type', Boolean(checked))}
+                  />
+                  <Label htmlFor="internship-placement" className="cursor-pointer flex-1">
+                    Internship + Placement
+                  </Label>
+                </div>
               </div>
 
               {durationWeeks && (

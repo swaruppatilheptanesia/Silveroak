@@ -27,18 +27,22 @@ const NOC_SIGNATURE_STAMP_WIDTH = 70;
 const NOC_SIGNATURE_STAMP_HEIGHT = Math.round(
   (NOC_SIGNATURE_STAMP_WIDTH * NOC_SIGNATURE_STAMP_CROP.height) / NOC_SIGNATURE_STAMP_CROP.width
 );
+// Signature block. `NOC_SIGNATURE_WITH_REGARDS_Y` is the DEFAULT/short-body baseline for "With Regards,";
+// at render time the block FLOWS below the student details (which themselves flow below the body) via a
+// Math.min hybrid, so a long body can't overlap it — see the withRegardsY computation in
+// generateNocCertificatePdf. The other lines keep fixed offsets from "With Regards," (stamp -44, name -52,
+// title -66, email -78). Email is one normal line under the title (no Director→Email gap).
 const NOC_SIGNATURE_STAMP_X = LEFT_MARGIN + 36;
-const NOC_SIGNATURE_STAMP_Y = 170;
-const NOC_SIGNATURE_WITH_REGARDS_Y = 214;
-const NOC_SIGNATURE_NAME_Y = 162;
-const NOC_SIGNATURE_TITLE_Y = 148;
-const NOC_SIGNATURE_MOBILE_Y = 134;
-const NOC_SIGNATURE_EMAIL_Y = 120;
+const NOC_SIGNATURE_WITH_REGARDS_Y = 198;
 
-const BODY_FONT = 'Helvetica';
-const BODY_FONT_BOLD = 'Helvetica-Bold';
-const BODY_FONT_OBLIQUE = 'Helvetica-Oblique';
-const BODY_FONT_BOLD_OBLIQUE = 'Helvetica-BoldOblique';
+// These are the PAGE RESOURCE KEYS (see buildPdfObjects: /F1=Helvetica, /F2=Helvetica-Bold,
+// /F3=Helvetica-Oblique, /F4=Helvetica-BoldOblique). The content stream MUST reference fonts by these
+// resource names, not by BaseFont name — strict viewers (macOS Preview / print pipelines) render NO text
+// when a `Tf` operator names a font that isn't a key in the page's /Font resource dict.
+const BODY_FONT = 'F1';
+const BODY_FONT_BOLD = 'F2';
+const BODY_FONT_OBLIQUE = 'F3';
+const BODY_FONT_BOLD_OBLIQUE = 'F4';
 
 type PdfStyle = {
   bold?: boolean;
@@ -51,7 +55,7 @@ type StyledToken = {
   style: PdfStyle;
 };
 
-type TextBlockType = 'paragraph' | 'heading' | 'list-item';
+type TextBlockType = 'paragraph' | 'heading' | 'list-item' | 'spacer';
 
 type TextBlock = {
   type: TextBlockType;
@@ -63,6 +67,7 @@ export interface NocCertificateStudent {
   full_name: string;
   enrollment_number: string;
   department: string;
+  branch: string;
   batch: string;
   current_semester: string | null;
   course: string | null;
@@ -139,9 +144,34 @@ function formatDate(date: Date, separator = '/') {
   return `${day}${separator}${month}${separator}${year}`;
 }
 
+// Adobe Core-14 Helvetica / Helvetica-Bold advance widths (1000-unit em), indexed by charCode-32
+// (printable ASCII 32..126). Helvetica-Oblique shares Helvetica's widths; BoldOblique shares Bold's.
+// Used for accurate centering/right-alignment and word-wrap (was an approximate heuristic that left
+// centered lines — title, Sub:, footer — a few points off true center).
+const HELVETICA_WIDTHS = [
+  278, 278, 355, 556, 556, 889, 667, 191, 333, 333, 389, 584, 278, 333, 278, 278,
+  556, 556, 556, 556, 556, 556, 556, 556, 556, 556, 278, 278, 584, 584, 584, 556,
+  1015, 667, 667, 722, 722, 667, 611, 778, 722, 278, 500, 667, 556, 833, 722, 778,
+  667, 778, 722, 667, 611, 722, 667, 944, 667, 667, 611, 278, 278, 278, 469, 556,
+  333, 556, 556, 500, 556, 556, 278, 556, 556, 222, 222, 500, 222, 833, 556, 556,
+  556, 556, 333, 500, 278, 556, 500, 722, 500, 500, 500, 334, 260, 334, 584,
+];
+const HELVETICA_BOLD_WIDTHS = [
+  278, 333, 474, 556, 556, 889, 722, 238, 333, 333, 389, 584, 278, 333, 278, 278,
+  556, 556, 556, 556, 556, 556, 556, 556, 556, 556, 333, 333, 584, 584, 584, 611,
+  975, 722, 722, 722, 722, 667, 611, 778, 722, 278, 556, 722, 611, 833, 722, 778,
+  667, 778, 722, 667, 611, 722, 667, 944, 667, 667, 611, 333, 278, 333, 584, 556,
+  333, 556, 611, 556, 611, 556, 333, 611, 611, 278, 278, 556, 278, 889, 611, 611,
+  611, 611, 389, 556, 333, 611, 556, 778, 556, 556, 500, 389, 280, 389, 584,
+];
+
 function measureCharacterWidth(character: string, fontSize: number, bold = false, italic = false) {
-  if (character === ' ') return fontSize * 0.28;
-  if (/^[ilI1'`.,:;|!\/\\-]$/.test(character)) return fontSize * 0.23;
+  const code = character.charCodeAt(0);
+  if (code >= 32 && code <= 126) {
+    const table = bold ? HELVETICA_BOLD_WIDTHS : HELVETICA_WIDTHS;
+    return (table[code - 32] * fontSize) / 1000;
+  }
+  // Fallback heuristic for non-ASCII glyphs not in the AFM tables above.
   if (/^[mwMW@#%&]$/.test(character)) return fontSize * 0.95;
   if (/^[A-Z]$/.test(character)) return fontSize * (bold ? 0.68 : 0.63);
   if (/^[0-9]$/.test(character)) return fontSize * 0.56;
@@ -216,6 +246,21 @@ function pushBlock(blocks: TextBlock[], block: TextBlock | null) {
   }
 }
 
+/**
+ * Like pushBlock, but a block element that closed with no real text (an editor blank line such as
+ * `<p></p>` / `<p><br></p>`) is kept as a `spacer` block so the PDF renders the intended vertical gap
+ * instead of dropping it.
+ */
+function pushBlockOrSpacer(blocks: TextBlock[], block: TextBlock | null) {
+  if (!block) return;
+  const hasContent = block.segments.some((segment) => segment.text.trim().length > 0);
+  if (hasContent) {
+    pushBlock(blocks, block);
+  } else {
+    blocks.push({ type: 'spacer', fontSize: block.fontSize, segments: [] });
+  }
+}
+
 function parseHtmlBlocks(html: string): TextBlock[] {
   const blocks: TextBlock[] = [];
   const tokens = html.match(/<!--[\s\S]*?-->|<\/?[a-zA-Z0-9]+[^>]*>|[^<]+/g) ?? [];
@@ -273,7 +318,10 @@ function parseHtmlBlocks(html: string): TextBlock[] {
           if (['h1', 'h2', 'h3'].includes(tagName)) {
             popStyle(styleStack);
           }
-          pushBlock(blocks, currentBlock);
+          // An empty block element (e.g. <p></p> or <p><br></p> the admin adds in the editor to create
+          // a blank line) is preserved as a spacer so the PDF reflects that spacing instead of dropping
+          // it (the reported editor-vs-issued-NOC mismatch).
+          pushBlockOrSpacer(blocks, currentBlock);
           currentBlock = null;
           continue;
         }
@@ -489,37 +537,39 @@ function buildFixedFooter() {
 
   commands += '0.9 w\n';
   commands += buildTextLineCommands(
-    [{ text: 'Established under The Gujarat Private Universities Act 2009', style: { bold: true } }],
+    [{ text: 'Established under The Gujarat Private Universities Act 2009', style: {} }],
     PAGE_WIDTH / 2,
     70,
-    8.3,
+    9.5,
     'center',
     [0.44, 0.20, 0.12]
   );
   commands += `${LEFT_MARGIN.toFixed(2)} 60.00 m ${(PAGE_WIDTH - LEFT_MARGIN).toFixed(2)} 60.00 l S\n`;
-  // Two centered lines: address, then phone/email/web.
+
+  // Two centered lines (address, then phone/email/web) sized to span nearly the full rule width —
+  // matching the letterhead footer. Regular weight; font size is fitted to the longer line (using regular
+  // metrics) so both fill the width.
+  const footerAddress = 'Nr. Bhavik Publications, Opp. Bhagwat Vidyapith, S.G. Road, Gota, Ahmedabad - 382481';
+  const footerContact = 'Phone : +91-79-66046300 | E-Mail : info@silveroakuni.ac.in | Web : www.silveroakuni.ac.in';
+  const footerTargetWidth = CONTENT_WIDTH * 0.98; // rule spans margin-to-margin
+  // Fit to the longer line, then step down 1pt per request (slightly under full width).
+  const footerFontSize = Math.min(
+    footerTargetWidth / measureText(footerAddress, 1, {}),
+    footerTargetWidth / measureText(footerContact, 1, {})
+  ) - 1;
+
   commands += buildTextLineCommands(
-    [
-      {
-        text: 'Nr. Bhavik Publications, Opp. Bhagwat Vidhyapith, S.G. Road, Gota, Ahmedabad - 382481',
-        style: {},
-      },
-    ],
+    [{ text: footerAddress, style: {} }],
     PAGE_WIDTH / 2,
-    48,
-    6.2,
+    47,
+    footerFontSize,
     'center'
   );
   commands += buildTextLineCommands(
-    [
-      {
-        text: 'Phone : +91-79-66046300 | E-Mail : info@silveroakuni.ac.in | Web : www.silveroakuni.ac.in',
-        style: {},
-      },
-    ],
+    [{ text: footerContact, style: {} }],
     PAGE_WIDTH / 2,
-    39,
-    6.2,
+    34,
+    footerFontSize,
     'center'
   );
 
@@ -867,7 +917,7 @@ export async function generateNocCertificatePdf(context: NocCertificateContext) 
     contact_person_designation: context.contactPersonDesignation ?? '',
     student_name: context.student.full_name,
     enrollment_number: context.student.enrollment_number,
-    branch: context.student.department,
+    branch: context.student.branch,
     department: context.student.department,
     batch: context.student.batch,
     semester: context.student.current_semester ?? '',
@@ -925,6 +975,12 @@ export async function generateNocCertificatePdf(context: NocCertificateContext) 
   const maxBodyWidth = CONTENT_WIDTH - 10;
   let currentY = bodyStartY;
   blocks.forEach((block, blockIndex) => {
+    // A spacer is an intentional blank line the admin added in the editor — advance one line, draw nothing.
+    if (block.type === 'spacer') {
+      currentY -= block.fontSize * 1.42;
+      return;
+    }
+
     const lines = wrapBlock(block, maxBodyWidth);
     const lineHeight = block.fontSize * 1.42;
     const gapAfterBlock = block.type === 'heading' ? 6 : 8;
@@ -948,19 +1004,24 @@ export async function generateNocCertificatePdf(context: NocCertificateContext) 
     { label: 'Student Name', value: context.student.full_name || '-' },
     { label: 'Institute Name', value: context.student.institute || '-' },
     { label: 'Course', value: context.student.course || '-' },
-    { label: 'Branch', value: context.student.department || '-' },
+    { label: 'Branch', value: context.student.branch || '-' },
     { label: 'Semester', value: context.student.current_semester ? String(context.student.current_semester) : '-' },
     { label: 'Duration', value: durationText },
   ];
 
   const STUDENT_BLOCK_TOP = 300;
   const STUDENT_LINE_HEIGHT = 12;
+  // FLOW the student block below the actual body end instead of pinning it at y=300. `currentY` is the
+  // next free baseline after the body loop. `Math.min` keeps the old fixed position for short/normal
+  // bodies (zero regression) and only pushes the block DOWN when a long body would otherwise overlap it.
+  const GAP_BODY_TO_STUDENT = 10;
+  const studentBlockTop = Math.min(STUDENT_BLOCK_TOP, currentY - GAP_BODY_TO_STUDENT);
   studentFields.forEach((field, index) => {
-    const rowY = STUDENT_BLOCK_TOP - index * STUDENT_LINE_HEIGHT;
+    const rowY = studentBlockTop - index * STUDENT_LINE_HEIGHT;
     content += buildTextLineCommands(
       [
         { text: `${field.label} : `, style: { bold: true } },
-        { text: field.value, style: {} },
+        { text: field.value, style: { bold: true } },
       ],
       LEFT_MARGIN + 2,
       rowY,
@@ -969,12 +1030,27 @@ export async function generateNocCertificatePdf(context: NocCertificateContext) 
     );
   });
 
-  content += buildTextLineCommands([{ text: 'With Regards,', style: {} }], LEFT_MARGIN + 2, NOC_SIGNATURE_WITH_REGARDS_Y, 10.5, 'left');
-  content += drawImage('Im3', NOC_SIGNATURE_STAMP_X, NOC_SIGNATURE_STAMP_Y, NOC_SIGNATURE_STAMP_WIDTH, NOC_SIGNATURE_STAMP_HEIGHT);
+  // Signature block flows below the student block (same Math.min hybrid), preserving the internal offsets
+  // from the old fixed positions (deltas from WITH_REGARDS_Y=198: stamp -44, name -52, title -66, email -78).
+  // The Math.max floor keeps the signature clear of the pinned footer even for a long body.
+  const studentBlockBottom = studentBlockTop - (studentFields.length - 1) * STUDENT_LINE_HEIGHT;
+  const GAP_STUDENT_TO_SIGN = 18;
+  const SIGNATURE_FLOOR_Y = 168; // keeps emailY (withRegardsY-78) ~= 90, above the footer top line (~70)
+  const withRegardsY = Math.max(
+    SIGNATURE_FLOOR_Y,
+    Math.min(NOC_SIGNATURE_WITH_REGARDS_Y, studentBlockBottom - GAP_STUDENT_TO_SIGN)
+  );
+  const signatureStampY = withRegardsY - 44;
+  const signatureNameY = withRegardsY - 52;
+  const signatureTitleY = withRegardsY - 66;
+  const signatureEmailY = withRegardsY - 78;
 
-  content += buildTextLineCommands([{ text: 'Dr. Nipen Shukla', style: { bold: true } }], LEFT_MARGIN + 2, NOC_SIGNATURE_NAME_Y, 10.5, 'left');
-  content += buildTextLineCommands([{ text: 'Director - Training & Placement Cell', style: {} }], LEFT_MARGIN + 2, NOC_SIGNATURE_TITLE_Y, 9.5, 'left');
-  content += buildTextLineCommands([{ text: 'Email: internship@silveroakuni.ac.in', style: {} }], LEFT_MARGIN + 2, NOC_SIGNATURE_EMAIL_Y, 9.5, 'left');
+  content += buildTextLineCommands([{ text: 'With Regards,', style: {} }], LEFT_MARGIN + 2, withRegardsY, 10.5, 'left');
+  content += drawImage('Im3', NOC_SIGNATURE_STAMP_X, signatureStampY, NOC_SIGNATURE_STAMP_WIDTH, NOC_SIGNATURE_STAMP_HEIGHT);
+
+  content += buildTextLineCommands([{ text: 'Dr. Nipen Shukla', style: { bold: true } }], LEFT_MARGIN + 2, signatureNameY, 10.5, 'left');
+  content += buildTextLineCommands([{ text: 'Director - Training & Placement Cell', style: {} }], LEFT_MARGIN + 2, signatureTitleY, 9.5, 'left');
+  content += buildTextLineCommands([{ text: 'Email: internship@silveroakuni.ac.in', style: {} }], LEFT_MARGIN + 2, signatureEmailY, 9.5, 'left');
 
   content += buildFixedFooter();
 

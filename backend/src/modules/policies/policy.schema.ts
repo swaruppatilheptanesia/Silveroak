@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { paginationSchema, sortSchema } from '../../shared/schemas/common';
+import { paginationSchema, searchSchema, sortSchema } from '../../shared/schemas/common';
 
 const targetListSchema = z.array(z.string().trim().min(1).max(300)).max(1).default([]);
 
@@ -24,7 +24,7 @@ export const createPolicySchema = z.object({
 
 export const updatePolicySchema = createPolicySchema.partial();
 
-export const queryPoliciesSchema = paginationSchema.merge(sortSchema).extend({
+export const queryPoliciesSchema = paginationSchema.merge(sortSchema).merge(searchSchema).extend({
   category: z.string().max(50).optional(),
   // When true, restrict to global policies (posting_type_master_id IS NULL).
   global: z.coerce.boolean().optional(),

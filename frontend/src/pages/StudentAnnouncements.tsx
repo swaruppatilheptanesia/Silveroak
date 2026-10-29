@@ -1,4 +1,4 @@
-import { useDeferredValue, useMemo, useState } from 'react';
+import { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
   CheckCircle2,
@@ -19,6 +19,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { ListPager } from '@/components/shared/ListPager';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Sheet,
@@ -51,8 +52,14 @@ export default function StudentAnnouncements() {
   const [selectedAnnouncementId, setSelectedAnnouncementId] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const deferredSearch = useDeferredValue(searchTerm);
+  const [page, setPage] = useState(1);
+
+  useEffect(() => { setPage(1); }, [deferredSearch]);
+
   const announcementsQuery = useAnnouncements({
-    limit: 100,
+    page,
+    limit: 20,
+    search: deferredSearch.trim() || undefined,
     sort_by: 'published_at',
     sort_order: 'desc',
   });
@@ -65,19 +72,11 @@ export default function StudentAnnouncements() {
     ?? announcements.find((announcement) => announcement.id === selectedAnnouncementId)
     ?? null;
 
-  const filteredAnnouncements = useMemo(() => {
-    const query = deferredSearch.trim().toLowerCase();
-    if (!query) return announcements;
-    return announcements.filter((announcement) =>
-      [
-        announcement.title,
-        announcement.content,
-        getAnnouncementAudienceLabel(announcement),
-        announcement.created_by_user?.name,
-      ].some((field) => (field ?? '').toLowerCase().includes(query))
-    );
-  }, [announcements, deferredSearch]);
+  const pagination = announcementsQuery.data?.pagination;
+  const hasActiveSearch = deferredSearch.trim().length > 0;
 
+  // Unread count reflects the current page only (server-paginated); the authoritative
+  // "new" signal is the sidebar dot.
   const unreadCount = useMemo(
     () => announcements.filter((announcement) => !announcement.my_receipt?.is_read).length,
     [announcements]
@@ -166,16 +165,16 @@ export default function StudentAnnouncements() {
           </Card>
         ) : null}
 
-        {filteredAnnouncements.length === 0 ? (
+        {announcements.length === 0 ? (
           <Card>
             <CardContent className="p-6">
               <EmptyState
                 icon={Megaphone}
-                title={announcements.length === 0 ? 'No announcements right now' : 'No matching announcements'}
+                title={hasActiveSearch ? 'No matching announcements' : 'No announcements right now'}
                 description={
-                  announcements.length === 0
-                    ? 'Published announcements for your profile will appear here.'
-                    : 'Try a different search term.'
+                  hasActiveSearch
+                    ? 'Try a different search term.'
+                    : 'Published announcements for your profile will appear here.'
                 }
                 compact
               />
@@ -183,7 +182,7 @@ export default function StudentAnnouncements() {
           </Card>
         ) : (
           <div className="space-y-3">
-            {filteredAnnouncements.map((announcement) => {
+            {announcements.map((announcement) => {
               const priorityMeta = getAnnouncementPriorityMeta(announcement.priority);
               const PriorityIcon = getPriorityIcon(announcement.priority);
               const isUnread = !announcement.my_receipt?.is_read;
@@ -239,6 +238,12 @@ export default function StudentAnnouncements() {
             })}
           </div>
         )}
+
+        <ListPager
+          page={pagination?.page ?? 1}
+          totalPages={pagination?.totalPages ?? 1}
+          onPageChange={setPage}
+        />
       </div>
 
       <Sheet

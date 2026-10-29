@@ -59,6 +59,8 @@ router.delete('/me/employments/:id', ctrl.deleteEmployment);
 router.get('/me/resumes', ctrl.getResumes);
 router.post('/me/resumes', resumeUpload.single('file'), ctrl.uploadResume);
 router.put('/me/resumes/:resumeId/default', ctrl.setDefaultResume);
+// Replace a resume's file in place — the id stays the same so applications keep a valid link.
+router.put('/me/resumes/:resumeId', resumeUpload.single('file'), ctrl.updateResume);
 router.delete('/me/resumes/:resumeId', ctrl.deleteResume);
 
 // Policy Acceptance

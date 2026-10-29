@@ -29,7 +29,7 @@ import { useServerSort } from '@/hooks/use-server-sort';
 import { useInternships } from '@/hooks/use-internship-api';
 import {
   getInternshipDaysRemaining,
-  getInternshipDepartment,
+  getInternshipBranch,
   getInternshipEnrollmentNumber,
   getInternshipStudentName,
 } from '@/lib/internshipModule';
@@ -155,7 +155,7 @@ export default function RecruiterInternships() {
                             <div>
                               <p className="font-medium text-foreground">{getInternshipStudentName(internship)}</p>
                               <p className="text-xs text-muted-foreground">
-                                {getInternshipEnrollmentNumber(internship)} • {getInternshipDepartment(internship)}
+                                {getInternshipEnrollmentNumber(internship)} • {getInternshipBranch(internship)}
                               </p>
                             </div>
                           </TableCell>

@@ -16,7 +16,8 @@ export const SYSTEM_ROLE_ORDER: UserRole[] = [
   'faculty_coordinator',
   'tpo_employee',
   'tpo_admin',
-  'management',
+  // 'management' column hidden: the Management role has no dashboard (only a profile page),
+  // so it is intentionally omitted from the Roles matrix. SYSTEM_ROLE_CONFIG keeps its entry.
   'super_admin',
 ];
 

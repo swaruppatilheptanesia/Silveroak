@@ -354,6 +354,11 @@ export const adminService = {
     const res = await apiClient.put<unknown>(`/admin/interests/registrations/${id}/withdraw`, { reason });
     throwIfError(res);
   },
+
+  deleteInterestRegistration: async (id: string): Promise<void> => {
+    const res = await apiClient.delete<unknown>(`/admin/interests/registrations/${id}`);
+    throwIfError(res);
+  },
 };
 
 export { AdminApiError };

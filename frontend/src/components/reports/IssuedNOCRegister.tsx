@@ -12,7 +12,7 @@ import { ReportToolbar, downloadCSV, type DateRange } from './ReportToolbar';
 type QueryParams = {
   from?: Date;
   to?: Date;
-  department?: string;
+  branch?: string;
   type?: string;
   search?: string;
 };
@@ -20,16 +20,16 @@ type QueryParams = {
 export default function IssuedNOCRegister() {
   const [dateRange, setDateRange] = useState<DateRange>({ from: undefined, to: undefined });
   const [searchQuery, setSearchQuery] = useState('');
-  const [deptFilter, setDeptFilter] = useState('all');
+  const [branchFilter, setBranchFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState('all');
 
   const queryParams = useMemo<QueryParams>(() => ({
     from: dateRange.from,
     to: dateRange.to,
-    department: deptFilter === 'all' ? undefined : deptFilter,
+    branch: branchFilter === 'all' ? undefined : branchFilter,
     type: typeFilter === 'all' ? undefined : typeFilter,
     search: searchQuery || undefined,
-  }), [dateRange.from, dateRange.to, deptFilter, searchQuery, typeFilter]);
+  }), [dateRange.from, dateRange.to, branchFilter, searchQuery, typeFilter]);
 
   const { data, isLoading } = useIssuedNocRegisterReport(queryParams);
 
@@ -39,7 +39,7 @@ export default function IssuedNOCRegister() {
       noc_number: request.noc_number,
       student_name: request.student_name,
       enrollment_number: request.enrollment_number,
-      department: request.department,
+      branch: request.branch,
       batch: request.batch,
       noc_type: request.noc_type,
       company_name: request.company_name,
@@ -49,15 +49,15 @@ export default function IssuedNOCRegister() {
     }));
   }, [data]);
 
-  const departments = useMemo(() => Array.from(new Set(issuedNOCs.map((request) => request.department))).sort(), [issuedNOCs]);
+  const branches = useMemo(() => Array.from(new Set(issuedNOCs.map((r: any) => r.branch).filter(Boolean))).sort() as string[], [issuedNOCs]);
 
   const stats = data?.stats ?? { total: 0, unique_companies: 0, by_type: { internship: 0, training: 0, project: 0 } };
 
   const handleExport = () => {
     const rows = issuedNOCs.map((request) =>
-      `${request.noc_number || '—'},${request.student_name},${request.enrollment_number},${request.department},${request.company_name},${NOC_TYPE_LABELS[request.noc_type as keyof typeof NOC_TYPE_LABELS] ?? request.noc_type},${request.issued_at ? new Date(request.issued_at).toLocaleDateString('en-IN') : '—'},${request.tpo_approver_name || '—'}`
+      `${request.noc_number || '—'},${request.student_name},${request.enrollment_number},${request.branch},${request.company_name},${NOC_TYPE_LABELS[request.noc_type as keyof typeof NOC_TYPE_LABELS] ?? request.noc_type},${request.issued_at ? new Date(request.issued_at).toLocaleDateString('en-IN') : '—'},${request.tpo_approver_name || '—'}`
     );
-    const csv = `NOC Number,Student,Roll No,Department,Company,Type,Issued Date,Approved By\n${rows.join('\n')}`;
+    const csv = `NOC Number,Student,Roll No,Branch,Company,Type,Issued Date,Approved By\n${rows.join('\n')}`;
     downloadCSV(csv, 'issued_noc_register');
   };
 
@@ -93,12 +93,14 @@ export default function IssuedNOCRegister() {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input placeholder="Search NOC ID, name, roll no..." value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} className="pl-9" />
             </div>
-            <Select value={deptFilter} onValueChange={setDeptFilter}>
-              <SelectTrigger><SelectValue placeholder="Department" /></SelectTrigger>
+            <Select value={branchFilter} onValueChange={setBranchFilter}>
+              <SelectTrigger className="w-full md:w-56">
+                <SelectValue placeholder="Branch" />
+              </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Departments</SelectItem>
-                {departments.map((department) => (
-                  <SelectItem key={department} value={department}>{department}</SelectItem>
+                <SelectItem value="all">All Branches</SelectItem>
+                {branches.map((branch) => (
+                  <SelectItem key={branch} value={branch}>{branch}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -120,7 +122,7 @@ export default function IssuedNOCRegister() {
                   <TableHead className="min-w-[150px]">NOC Number</TableHead>
                   <TableHead className="min-w-[140px]">Student</TableHead>
                   <TableHead>Roll No.</TableHead>
-                  <TableHead>Department</TableHead>
+                  <TableHead>Branch</TableHead>
                   <TableHead>Company</TableHead>
                   <TableHead>Type</TableHead>
                   <TableHead>Issued Date</TableHead>
@@ -148,7 +150,7 @@ export default function IssuedNOCRegister() {
                       </TableCell>
                       <TableCell className="font-medium text-sm">{request.student_name}</TableCell>
                       <TableCell className="text-sm">{request.enrollment_number}</TableCell>
-                      <TableCell className="text-sm">{request.department}</TableCell>
+                      <TableCell className="text-sm">{request.branch}</TableCell>
                       <TableCell className="text-sm">{request.company_name}</TableCell>
                       <TableCell>
                         <Badge variant="outline" className="text-xs">{NOC_TYPE_LABELS[request.noc_type as keyof typeof NOC_TYPE_LABELS] ?? request.noc_type}</Badge>

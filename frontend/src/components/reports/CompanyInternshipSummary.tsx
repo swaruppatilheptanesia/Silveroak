@@ -25,7 +25,7 @@ import { useToast } from '@/hooks/use-toast';
 type QueryParams = {
   from?: string;
   to?: string;
-  department?: string;
+  branch?: string;
   batch?: string;
   search?: string;
 };
@@ -38,14 +38,14 @@ interface CompanySummary {
   completed: number;
   discontinued: number;
   avgStipend: number;
-  departments: string[];
+  branches: string[];
   batches: string[];
 }
 
 export default function CompanyInternshipSummary() {
   const { toast } = useToast();
   const [searchQuery, setSearchQuery] = useState('');
-  const [departmentFilter, setDepartmentFilter] = useState('all');
+  const [branchFilter, setBranchFilter] = useState('all');
   const [batchFilter, setBatchFilter] = useState('all');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
@@ -53,10 +53,10 @@ export default function CompanyInternshipSummary() {
   const queryParams = useMemo<QueryParams>(() => ({
     from: dateFrom || undefined,
     to: dateTo || undefined,
-    department: departmentFilter === 'all' ? undefined : departmentFilter,
+    branch: branchFilter === 'all' ? undefined : branchFilter,
     batch: batchFilter === 'all' ? undefined : batchFilter,
     search: searchQuery || undefined,
-  }), [batchFilter, dateFrom, dateTo, departmentFilter, searchQuery]);
+  }), [batchFilter, dateFrom, dateTo, branchFilter, searchQuery]);
 
   const { data, isLoading } = useCompanyInternshipReport(queryParams);
 
@@ -69,12 +69,14 @@ export default function CompanyInternshipSummary() {
       completed: company.completed,
       discontinued: company.discontinued,
       avgStipend: company.avgStipend,
-      departments: company.departments ?? [],
+      branches: company.branches ?? [],
       batches: company.batches ?? [],
     }));
   }, [data]);
 
   const batches = useMemo(() => Array.from(new Set(summaries.flatMap((summary) => summary.batches))).sort(), [summaries]);
+
+  const branches = useMemo(() => Array.from(new Set(summaries.flatMap((s: any) => s.branches ?? []).filter(Boolean))).sort() as string[], [summaries]);
 
   const totals = useMemo(() => ({
     companies: data?.stats?.companies ?? summaries.length,
@@ -84,9 +86,9 @@ export default function CompanyInternshipSummary() {
   }), [data, summaries]);
 
   const handleExportCsv = () => {
-    const header = 'Company,Total Interns,Ongoing,Completed,Discontinued,Avg Stipend (₹),Departments,Batches\n';
+    const header = 'Company,Total Interns,Ongoing,Completed,Discontinued,Avg Stipend (₹),Branches,Batches\n';
     const rows = summaries.map((summary) =>
-      `"${summary.company_name}",${summary.total},${summary.ongoing},${summary.completed},${summary.discontinued},${summary.avgStipend || 'N/A'},"${summary.departments.join(', ')}","${summary.batches.join(', ')}"`
+      `"${summary.company_name}",${summary.total},${summary.ongoing},${summary.completed},${summary.discontinued},${summary.avgStipend || 'N/A'},"${summary.branches.join(', ')}","${summary.batches.join(', ')}"`
     ).join('\n');
     const blob = new Blob([header + rows], { type: 'text/csv' });
     const a = document.createElement('a');
@@ -136,12 +138,12 @@ export default function CompanyInternshipSummary() {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input placeholder="Search company..." value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} className="pl-9" />
             </div>
-            <Select value={departmentFilter} onValueChange={setDepartmentFilter}>
-              <SelectTrigger><SelectValue placeholder="Department" /></SelectTrigger>
+            <Select value={branchFilter} onValueChange={setBranchFilter}>
+              <SelectTrigger><SelectValue placeholder="Branch" /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Departments</SelectItem>
-                {Array.from(new Set(summaries.flatMap((summary) => summary.departments))).sort().map((department) => (
-                  <SelectItem key={department} value={department}>{department}</SelectItem>
+                <SelectItem value="all">All Branches</SelectItem>
+                {branches.map((branch) => (
+                  <SelectItem key={branch} value={branch}>{branch}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -168,7 +170,7 @@ export default function CompanyInternshipSummary() {
                   <TableHead className="text-center">Completed</TableHead>
                   <TableHead className="text-center">Discontinued</TableHead>
                   <TableHead className="text-right">Avg Stipend</TableHead>
-                  <TableHead>Departments</TableHead>
+                  <TableHead>Branches</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -193,8 +195,8 @@ export default function CompanyInternshipSummary() {
                       </TableCell>
                       <TableCell>
                         <div className="flex flex-wrap gap-1">
-                          {summary.departments.map((department) => (
-                            <Badge key={department} variant="outline" className="text-xs">{department}</Badge>
+                          {summary.branches.map((branch) => (
+                            <Badge key={branch} variant="outline" className="text-xs">{branch}</Badge>
                           ))}
                         </div>
                       </TableCell>

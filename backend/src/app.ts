@@ -67,7 +67,12 @@ app.use(
 app.use(helmet());
 app.use(
   cors({
-    origin: env.corsOrigin,
+    // Allow any configured origin (portal frontend, PlaceReady web console, dev origins).
+    // Requests with no Origin header (native/Flutter clients, curl, same-origin) are allowed.
+    origin: (origin, callback) => {
+      if (!origin || env.corsOrigins.includes(origin)) return callback(null, true);
+      return callback(new Error(`Origin not allowed by CORS: ${origin}`));
+    },
     credentials: true,
   })
 );
@@ -81,6 +86,10 @@ app.use(express.urlencoded({ extended: true }));
 
 // Swagger docs (public)
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+// Raw OpenAPI JSON (public) — Flutter/openapi codegen and the PlaceReady clients read this.
+app.get('/api-docs.json', (_req, res) => {
+  res.json(swaggerSpec);
+});
 
 // Health check (public)
 app.get('/api/health', (_req, res) => {
@@ -165,6 +174,8 @@ app.use('/api/admin/masters', adminMastersRouter);
 app.use('/api/reports', reportRoutes);
 app.use('/api/recruiter', recruiterPortalRoutes);
 app.use('/api/faculty', facultyRoutes);
+
+// PlaceReady (AI placement-readiness module)
 
 // 404 handler for unmatched routes
 app.use((_req, res) => {

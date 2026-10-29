@@ -266,7 +266,7 @@ export default function AdminDashboard() {
                   <div key={student.student_id} className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
                     <div>
                       <p className="font-medium">{student.full_name}</p>
-                      <p className="text-sm text-muted-foreground">{student.roll_number} • {student.department}</p>
+                      <p className="text-sm text-muted-foreground">{student.roll_number} • {student.branch ?? student.department}</p>
                     </div>
                     <Badge variant="outline" className="bg-amber-500/10 text-amber-600 border-amber-500/20">
                       <Clock className="h-3 w-3 mr-1" /> Pending

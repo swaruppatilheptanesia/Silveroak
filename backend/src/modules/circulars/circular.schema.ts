@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { paginationSchema, sortSchema } from '../../shared/schemas/common';
+import { paginationSchema, searchSchema, sortSchema } from '../../shared/schemas/common';
 
 export const createTemplateSchema = z.object({
   name: z.string().min(1).max(200),
@@ -26,7 +26,10 @@ export const queryTemplatesSchema = paginationSchema.merge(sortSchema).extend({
   type: z.enum(['placement', 'internship', 'campus_drive', 'general']).optional(),
 });
 
+export const queryGeneratedCircularsSchema = paginationSchema.merge(sortSchema).merge(searchSchema);
+
 export type CreateTemplateInput = z.infer<typeof createTemplateSchema>;
+export type QueryGeneratedCircularsInput = z.infer<typeof queryGeneratedCircularsSchema>;
 export type UpdateTemplateInput = z.infer<typeof updateTemplateSchema>;
 export type GenerateCircularInput = z.infer<typeof generateCircularSchema>;
 export type QueryTemplatesInput = z.infer<typeof queryTemplatesSchema>;

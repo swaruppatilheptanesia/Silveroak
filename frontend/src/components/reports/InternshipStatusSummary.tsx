@@ -12,7 +12,7 @@ import { ReportToolbar, downloadCSV, type DateRange } from './ReportToolbar';
 type QueryParams = {
   from?: Date;
   to?: Date;
-  department?: string;
+  branch?: string;
   company_id?: string;
   type?: string;
   status?: string;
@@ -24,7 +24,7 @@ export default function InternshipStatusSummary() {
   const [dateRange, setDateRange] = useState<DateRange>({ from: undefined, to: undefined });
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
-  const [departmentFilter, setDepartmentFilter] = useState('all');
+  const [branchFilter, setBranchFilter] = useState('all');
   const [companyFilter, setCompanyFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState('all');
 
@@ -33,12 +33,12 @@ export default function InternshipStatusSummary() {
   const queryParams = useMemo<QueryParams>(() => ({
     from: dateRange.from,
     to: dateRange.to,
-    department: departmentFilter === 'all' ? undefined : departmentFilter,
+    branch: branchFilter === 'all' ? undefined : branchFilter,
     company_id: companyFilter === 'all' ? undefined : companyFilter,
     type: typeFilter === 'all' ? undefined : typeFilter,
     status: statusFilter === 'all' ? undefined : statusFilter,
     search: searchQuery || undefined,
-  }), [companyFilter, dateRange.from, dateRange.to, departmentFilter, searchQuery, statusFilter, typeFilter]);
+  }), [companyFilter, dateRange.from, dateRange.to, branchFilter, searchQuery, statusFilter, typeFilter]);
 
   const { data, isLoading } = useInternshipStatusReport(queryParams);
 
@@ -47,7 +47,7 @@ export default function InternshipStatusSummary() {
       id: internship.internship_id,
       student_name: internship.student_name,
       enrollment_number: internship.enrollment_number,
-      department: internship.department,
+      branch: internship.branch,
       batch: internship.batch,
       company_name: internship.company_name,
       role: internship.role,
@@ -66,13 +66,14 @@ export default function InternshipStatusSummary() {
     }));
   }, [companyData]);
 
-  const departments = useMemo(() => Array.from(new Set(internships.map((internship) => internship.department))).sort(), [internships]);
+  const branches = useMemo(() => Array.from(new Set(internships.map((r: any) => r.branch).filter(Boolean))).sort() as string[], [internships]);
+
   const stats = data?.stats ?? { total: 0, ongoing: 0, completed: 0, discontinued: 0 };
 
   const handleExportCsv = () => {
-    const header = 'Student,Enrollment,Department,Batch,Company,Role,Type,Start Date,End Date,Status,Stipend (₹)\n';
+    const header = 'Student,Enrollment,Branch,Batch,Company,Role,Type,Start Date,End Date,Status,Stipend (₹)\n';
     const rows = internships.map((internship) =>
-      `"${internship.student_name}",${internship.enrollment_number},${internship.department},${internship.batch},${internship.company_name},"${internship.role}",${INTERNSHIP_TYPE_CONFIG[internship.internship_type as keyof typeof INTERNSHIP_TYPE_CONFIG]?.label ?? internship.internship_type},${new Date(internship.start_date).toLocaleDateString('en-IN')},${internship.end_date ? new Date(internship.end_date).toLocaleDateString('en-IN') : '—'},${INTERNSHIP_STATUS_CONFIG[internship.status as keyof typeof INTERNSHIP_STATUS_CONFIG]?.label ?? internship.status},${internship.stipend_amount || 'N/A'}`
+      `"${internship.student_name}",${internship.enrollment_number},${internship.branch},${internship.batch},${internship.company_name},"${internship.role}",${INTERNSHIP_TYPE_CONFIG[internship.internship_type as keyof typeof INTERNSHIP_TYPE_CONFIG]?.label ?? internship.internship_type},${new Date(internship.start_date).toLocaleDateString('en-IN')},${internship.end_date ? new Date(internship.end_date).toLocaleDateString('en-IN') : '—'},${INTERNSHIP_STATUS_CONFIG[internship.status as keyof typeof INTERNSHIP_STATUS_CONFIG]?.label ?? internship.status},${internship.stipend_amount || 'N/A'}`
     ).join('\n');
     downloadCSV(header + rows, 'internship_status_summary');
   };
@@ -118,12 +119,12 @@ export default function InternshipStatusSummary() {
                 ))}
               </SelectContent>
             </Select>
-            <Select value={departmentFilter} onValueChange={setDepartmentFilter}>
-              <SelectTrigger><SelectValue placeholder="Department" /></SelectTrigger>
+            <Select value={branchFilter} onValueChange={setBranchFilter}>
+              <SelectTrigger><SelectValue placeholder="Branch" /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Departments</SelectItem>
-                {departments.map((department) => (
-                  <SelectItem key={department} value={department}>{department}</SelectItem>
+                <SelectItem value="all">All Branches</SelectItem>
+                {branches.map((branch) => (
+                  <SelectItem key={branch} value={branch}>{branch}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -152,7 +153,7 @@ export default function InternshipStatusSummary() {
               <TableHeader>
                 <TableRow>
                   <TableHead className="min-w-[160px]">Student</TableHead>
-                  <TableHead>Department</TableHead>
+                  <TableHead>Branch</TableHead>
                   <TableHead>Company</TableHead>
                   <TableHead>Role</TableHead>
                   <TableHead>Type</TableHead>
@@ -179,7 +180,7 @@ export default function InternshipStatusSummary() {
                           <p className="text-xs text-muted-foreground">{internship.enrollment_number}</p>
                         </div>
                       </TableCell>
-                      <TableCell className="text-sm">{internship.department}</TableCell>
+                      <TableCell className="text-sm">{internship.branch}</TableCell>
                       <TableCell className="text-sm">{internship.company_name}</TableCell>
                       <TableCell className="text-sm">{internship.role}</TableCell>
                       <TableCell>

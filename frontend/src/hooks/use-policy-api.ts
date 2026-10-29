@@ -2,7 +2,7 @@
  * React Query hooks for the Policies API module.
  * Covers admin CRUD for placement policies.
  */
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { policyService } from '@/services/policyService';
 import type {
   PolicyQueryParams,
@@ -28,6 +28,7 @@ export function usePolicies(params: PolicyQueryParams = {}, enabled = true) {
     queryKey: policyKeys.list(params),
     queryFn: () => policyService.getPolicies(params),
     staleTime: 5 * 60 * 1000,
+    placeholderData: keepPreviousData,
     enabled,
   });
 }

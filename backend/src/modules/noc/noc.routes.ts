@@ -5,22 +5,25 @@ import { requireStudentProfileAccess } from '../../middleware/student-access';
 import { validate } from '../../middleware/validate';
 import { requireRole } from '../../middleware/role';
 import { scopeToDepartment } from '../../middleware/scope';
-import { nocOfferLetterUpload, nocSupportingDocumentUpload, nocCompletionCertificateUpload } from '../../middleware/upload';
+import { nocOfferLetterUpload, nocSupportingDocumentUpload, nocCompletionCertificateUpload, nocTerminationLetterUpload } from '../../middleware/upload';
 import { createNocSchema, approveNocSchema, rejectNocSchema, rejectCompletionCertificateSchema, queryNocSchema } from './noc.schema';
 
 const router = Router();
 
-// Student routes
-router.get('/my', requireRole('student'), requireStudentProfileAccess, ctrl.getMyNocs);
+// Student routes — gated by the noc_requests permission matrix so a Super Admin can
+// revoke a student's View/Create from the Roles tab and have it enforced here.
+router.get('/my', requireRole('student'), requirePermission('noc_requests', 'view'), requireStudentProfileAccess, ctrl.getMyNocs);
 router.get(
   '/field-suggestions',
   requireRole('student'),
+  requirePermission('noc_requests', 'view'),
   requireStudentProfileAccess,
   ctrl.getNocFieldSuggestions,
 );
 router.post(
   '/offer-letter',
   requireRole('student'),
+  requirePermission('noc_requests', 'create'),
   requireStudentProfileAccess,
   nocOfferLetterUpload.single('file'),
   ctrl.uploadOfferLetter,
@@ -28,13 +31,23 @@ router.post(
 router.post(
   '/supporting-document',
   requireRole('student'),
+  requirePermission('noc_requests', 'create'),
   requireStudentProfileAccess,
   nocSupportingDocumentUpload.single('file'),
   ctrl.uploadSupportingDocument,
 );
 router.post(
+  '/termination-letter',
+  requireRole('student'),
+  requirePermission('noc_requests', 'create'),
+  requireStudentProfileAccess,
+  nocTerminationLetterUpload.single('file'),
+  ctrl.uploadTerminationLetter,
+);
+router.post(
   '/',
   requireRole('student'),
+  requirePermission('noc_requests', 'create'),
   requireStudentProfileAccess,
   validate(createNocSchema),
   ctrl.createNoc,
@@ -43,6 +56,7 @@ router.post(
 router.post(
   '/:nocId/completion-certificate',
   requireRole('student'),
+  requirePermission('noc_requests', 'create'),
   requireStudentProfileAccess,
   nocCompletionCertificateUpload.single('file'),
   ctrl.submitCompletionCertificate,
@@ -66,6 +80,14 @@ router.get(
   scopeToDepartment(),
   validate(queryNocSchema, 'query'),
   ctrl.getNocs
+);
+// Faculty NOC dashboard stat-card counts (department-wide). Must precede `/:nocId`.
+router.get(
+  '/summary',
+  requireRole('faculty_coordinator'),
+  requirePermission('noc_requests', 'view'),
+  scopeToDepartment(),
+  ctrl.getFacultyNocSummary
 );
 router.get(
   '/:nocId',

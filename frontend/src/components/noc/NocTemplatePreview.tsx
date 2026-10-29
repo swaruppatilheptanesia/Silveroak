@@ -140,8 +140,8 @@ export function NocTemplatePreview({
                   { label: 'Semester', value: values.semester },
                   { label: 'Duration', value: `${values.duration_from} to ${values.duration_to}` },
                 ].map((field) => (
-                  <div key={field.label} className="flex gap-1">
-                    <span className="w-[120px] shrink-0 font-medium">{field.label}</span>
+                  <div key={field.label} className="flex gap-1 font-semibold">
+                    <span className="w-[120px] shrink-0">{field.label}</span>
                     <span>: {field.value}</span>
                   </div>
                 ))}
@@ -166,18 +166,17 @@ export function NocTemplatePreview({
                   <div className="absolute left-0 top-[52px] font-semibold">Dr. Nipen Shukla</div>
                 </div>
                 <div>Director - Training & Placement Cell</div>
-
                 <div>Email: internship@silveroakuni.ac.in</div>
               </div>
 
               <div className="mt-8 text-center leading-tight">
-                <div className="text-[10px] font-semibold text-[#6a3420]">
+                <div className="text-[11px] font-medium text-[#6a3420]">
                   Established under The Gujarat Private Universities Act 2009
                 </div>
-                <div className="mt-1 border-t border-foreground/70 pt-2 text-[7px] tracking-tight">
-                  Nr. Bhavik Publications, Opp. Bhagwat Vidhyapith, S.G. Road, Gota, Ahmedabad - 382481
+                <div className="mt-1 border-t border-foreground/70 pt-2 text-[8px]">
+                  Nr. Bhavik Publications, Opp. Bhagwat Vidyapith, S.G. Road, Gota, Ahmedabad - 382481
                 </div>
-                <div className="mt-0.5 text-[7px] tracking-tight">
+                <div className="mt-0.5 text-[8px]">
                   Phone : +91-79-66046300 | E-Mail : info@silveroakuni.ac.in | Web : www.silveroakuni.ac.in
                 </div>
               </div>

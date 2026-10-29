@@ -2,10 +2,11 @@
  * React Query hooks for the Circulars API module.
  * Covers templates CRUD, generated circulars.
  */
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { circularService } from '@/services/circularService';
 import type {
   TemplateQueryParams,
+  GeneratedCircularQueryParams,
   CreateTemplateInput,
   UpdateTemplateInput,
   GenerateCircularInput,
@@ -18,6 +19,7 @@ export const circularKeys = {
   templates: (params: TemplateQueryParams) => [...circularKeys.all, 'templates', params] as const,
   templateDetail: (id: string) => [...circularKeys.all, 'template', id] as const,
   generated: () => [...circularKeys.all, 'generated'] as const,
+  generatedPaged: (params: GeneratedCircularQueryParams) => [...circularKeys.all, 'generated', 'paged', params] as const,
   myCirculars: () => [...circularKeys.all, 'my'] as const,
 };
 
@@ -71,6 +73,15 @@ export function useGeneratedCirculars() {
   });
 }
 
+export function useGeneratedCircularsPaged(params: GeneratedCircularQueryParams = {}) {
+  return useQuery({
+    queryKey: circularKeys.generatedPaged(params),
+    queryFn: () => circularService.getGeneratedCircularsPaginated(params),
+    staleTime: 2 * 60 * 1000,
+    placeholderData: keepPreviousData,
+  });
+}
+
 export function useMyCirculars(enabled = true) {
   return useQuery({
     queryKey: circularKeys.myCirculars(),
@@ -86,6 +97,16 @@ export function useGenerateCircular() {
     mutationFn: (data: GenerateCircularInput) => circularService.generateCircular(data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: circularKeys.generated() });
+      qc.invalidateQueries({ queryKey: circularKeys.all });
+    },
+  });
+}
+
+export function useDeleteGeneratedCircular() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (circularId: string) => circularService.deleteGeneratedCircular(circularId),
+    onSuccess: () => {
       qc.invalidateQueries({ queryKey: circularKeys.all });
     },
   });

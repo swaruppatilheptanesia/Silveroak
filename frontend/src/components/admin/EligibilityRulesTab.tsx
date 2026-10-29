@@ -2,7 +2,6 @@ import { useMemo, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { MasterMultiSelect } from '@/components/shared/MasterMultiSelect';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -31,6 +30,14 @@ import {
   FileText,
   GraduationCap,
 } from 'lucide-react';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { useQuery } from '@tanstack/react-query';
 import { useToast } from '@/hooks/use-toast';
 import {
   useAdminEligibilityRules,
@@ -38,8 +45,9 @@ import {
   useDeleteAdminEligibilityRule,
   useUpdateAdminEligibilityRule,
 } from '@/hooks/use-admin-api';
-import { useMasterValues } from '@/hooks/use-master-api';
-import { addMasterValue, mergeMasterValues } from '@/lib/masterModule';
+import { policyKeys, usePolicyInstituteOptions } from '@/hooks/use-policy-api';
+import { policyService } from '@/services/policyService';
+import { mergeMasterValues } from '@/lib/masterModule';
 import type { ApiAdminEligibilityRule, CreateAdminEligibilityRuleInput } from '@/types/admin';
 
 type RuleFormData = CreateAdminEligibilityRuleInput;
@@ -59,24 +67,43 @@ export default function EligibilityRulesTab() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [editingRule, setEditingRule] = useState<ApiAdminEligibilityRule | null>(null);
   const [formData, setFormData] = useState<RuleFormData>(emptyRule);
-  const [customBranch, setCustomBranch] = useState('');
+  // CRM branch cascade (Institute → Course → Branch): pick a course to load its ERP branches.
+  const [scopeInstituteId, setScopeInstituteId] = useState<number | null>(null);
+  const [scopeCourseId, setScopeCourseId] = useState<number | null>(null);
 
   const rulesQuery = useAdminEligibilityRules();
-  const branchOptionsQuery = useMasterValues('branch');
+  const institutesQuery = usePolicyInstituteOptions();
+  const coursesQuery = useQuery({
+    queryKey: policyKeys.courses(scopeInstituteId),
+    queryFn: () => policyService.getCourseOptions(scopeInstituteId as number),
+    enabled: scopeInstituteId != null,
+  });
+  const branchesQuery = useQuery({
+    queryKey: policyKeys.branches(scopeCourseId),
+    queryFn: () => policyService.getBranchOptions(scopeCourseId as number),
+    enabled: scopeCourseId != null,
+  });
   const createRuleMutation = useCreateAdminEligibilityRule();
   const updateRuleMutation = useUpdateAdminEligibilityRule();
   const deleteRuleMutation = useDeleteAdminEligibilityRule();
 
   const rules = rulesQuery.data ?? [];
+  // Branch options = the selected course's CRM branches, merged with any already-selected branches
+  // (which may span multiple courses) so cross-course selections stay visible and removable.
   const availableBranchOptions = useMemo(
-    () => mergeMasterValues(branchOptionsQuery.data ?? [], formData.required_branches),
-    [branchOptionsQuery.data, formData.required_branches],
+    () => mergeMasterValues((branchesQuery.data ?? []).map((option) => option.name), formData.required_branches),
+    [branchesQuery.data, formData.required_branches],
   );
+
+  const resetScopeCascade = () => {
+    setScopeInstituteId(null);
+    setScopeCourseId(null);
+  };
 
   const handleOpenCreate = () => {
     setEditingRule(null);
     setFormData(emptyRule);
-    setCustomBranch('');
+    resetScopeCascade();
     setIsDialogOpen(true);
   };
 
@@ -90,7 +117,7 @@ export default function EligibilityRulesTab() {
       min_tenth_percentage: rule.min_tenth_percentage ?? 0,
       min_twelfth_percentage: rule.min_twelfth_percentage ?? 0,
     });
-    setCustomBranch('');
+    resetScopeCascade();
     setIsDialogOpen(true);
   };
 
@@ -114,7 +141,7 @@ export default function EligibilityRulesTab() {
       setIsDialogOpen(false);
       setEditingRule(null);
       setFormData(emptyRule);
-      setCustomBranch('');
+      resetScopeCascade();
     } catch (error) {
       toast({
         title: 'Save Failed',
@@ -150,17 +177,6 @@ export default function EligibilityRulesTab() {
         ? current.required_branches.filter((item) => item !== branch)
         : [...(current.required_branches || []), branch],
     }));
-  };
-
-  const handleAddCustomBranch = () => {
-    const trimmedValue = customBranch.trim();
-    if (!trimmedValue) return;
-
-    setFormData((current) => ({
-      ...current,
-      required_branches: addMasterValue(current.required_branches ?? [], trimmedValue),
-    }));
-    setCustomBranch('');
   };
 
   return (
@@ -352,18 +368,101 @@ export default function EligibilityRulesTab() {
               </div>
             </div>
 
-            <MasterMultiSelect
-              label="Eligible Branches"
-              description="Leave empty to allow all branches. TPO can pick from branch masters or add a custom branch."
-              options={availableBranchOptions}
-              values={formData.required_branches ?? []}
-              onToggle={toggleBranch}
-              customValue={customBranch}
-              onCustomValueChange={setCustomBranch}
-              onAddCustom={handleAddCustomBranch}
-              customPlaceholder="Add a custom branch"
-              mode="checkbox"
-            />
+            <div className="space-y-3">
+              <div>
+                <Label>Eligible Branches</Label>
+                <p className="text-sm text-muted-foreground">
+                  Leave empty to allow all branches. Pick an Institute → Course to load its ERP branches, then
+                  select the branches to include. Selections can span multiple courses.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="scope_institute">Institute</Label>
+                  <Select
+                    value={scopeInstituteId != null ? String(scopeInstituteId) : undefined}
+                    onValueChange={(value) => {
+                      setScopeInstituteId(Number(value));
+                      setScopeCourseId(null);
+                    }}
+                  >
+                    <SelectTrigger id="scope_institute">
+                      <SelectValue placeholder="Select institute" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(institutesQuery.data ?? []).map((option) => (
+                        <SelectItem key={option.id} value={String(option.id)}>
+                          {option.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="scope_course">Course</Label>
+                  <Select
+                    value={scopeCourseId != null ? String(scopeCourseId) : undefined}
+                    onValueChange={(value) => setScopeCourseId(Number(value))}
+                    disabled={scopeInstituteId == null || coursesQuery.isLoading}
+                  >
+                    <SelectTrigger id="scope_course">
+                      <SelectValue placeholder={scopeInstituteId == null ? 'Select institute first' : 'Select course'} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(coursesQuery.data ?? []).map((option) => (
+                        <SelectItem key={option.id} value={String(option.id)}>
+                          {option.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              {scopeCourseId == null ? (
+                <p className="text-sm text-muted-foreground">Select a course to list its branches.</p>
+              ) : branchesQuery.isLoading ? (
+                <p className="text-sm text-muted-foreground">Loading branches…</p>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  {availableBranchOptions.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No branches found for this course.</p>
+                  ) : (
+                    availableBranchOptions.map((option) => (
+                      <label key={option} className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4"
+                          checked={(formData.required_branches ?? []).includes(option)}
+                          onChange={() => toggleBranch(option)}
+                        />
+                        {option}
+                      </label>
+                    ))
+                  )}
+                </div>
+              )}
+
+              {(formData.required_branches?.length ?? 0) > 0 && (
+                <div className="space-y-1">
+                  <p className="text-sm text-muted-foreground">Selected branches:</p>
+                  <div className="flex flex-wrap gap-1">
+                    {formData.required_branches?.map((branch) => (
+                      <Badge
+                        key={branch}
+                        variant="secondary"
+                        className="cursor-pointer text-xs"
+                        onClick={() => toggleBranch(branch)}
+                        title="Click to remove"
+                      >
+                        {branch} ✕
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsDialogOpen(false)}>Cancel</Button>

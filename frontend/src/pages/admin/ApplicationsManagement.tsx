@@ -41,9 +41,10 @@ import { SortableTableHead } from '@/components/shared/SortableTableHead';
 import { useServerSort } from '@/hooks/use-server-sort';
 import { useAllApplications, useApplications } from '@/hooks/use-application-api';
 import { usePostings } from '@/hooks/use-posting-api';
-import { usePostingTypeOptions } from '@/hooks/use-posting-type-options';
-import { formatDate } from '@/lib/formatters';
+import { formatDate, toDateParam } from '@/lib/formatters';
 import { formatPostingTypeLabel } from '@/lib/postingModule';
+import { useAuth } from '@/contexts/AuthContext';
+import { hasPermission } from '@/lib/permissionModule';
 import { APPLICATION_STAGE_CONFIG } from '@/types/application';
 import type { ApiApplicationListItem, ApplicationStage } from '@/types/application';
 
@@ -104,7 +105,7 @@ function getApplicationSearchFields(application: ApiApplicationListItem) {
     application.student.enrollment_number,
     application.student.roll_number ?? '',
     application.student.email,
-    application.student.department,
+    application.student.branch ?? application.student.department,
     application.student.batch,
     application.student.course ?? '',
     application.student.institute ?? '',
@@ -131,7 +132,6 @@ export default function ApplicationsManagement() {
   const [stageFilter, setStageFilter] = useState<string>('all');
   const [postingFilter, setPostingFilter] = useState<string>('all');
   const [postingTypeFilter, setPostingTypeFilter] = useState<string>('all');
-  const { options: postingTypeOptions, isLoading: postingTypesLoading, isEmpty: postingTypesEmpty } = usePostingTypeOptions();
   const [instituteFilter, setInstituteFilter] = useState('');
   const [courseFilter, setCourseFilter] = useState('');
   const [branchFilter, setBranchFilter] = useState('');
@@ -140,6 +140,8 @@ export default function ApplicationsManagement() {
   const [dateRange, setDateRange] = useState<DateRangeValue>({ from: undefined, to: undefined });
   const [pipelinesCollapsed, setPipelinesCollapsed] = useState(true);
   const [exportOpen, setExportOpen] = useState(false);
+  const { user } = useAuth();
+  const canExport = hasPermission(user?.permissions, { module: 'applications', action: 'export' }, user?.role);
   const [page, setPage] = useState(1);
   const { sort_by, sort_order, onSort } = useServerSort<
     'student' | 'posting' | 'stage' | 'applied_at'
@@ -152,8 +154,8 @@ export default function ApplicationsManagement() {
     branch: branchFilter || undefined,
     semester: semesterFilter === 'all' ? undefined : semesterFilter,
     academic_year: academicYearFilter === 'all' ? undefined : academicYearFilter,
-    date_from: dateRange.from ? dateRange.from.toISOString() : undefined,
-    date_to: dateRange.to ? dateRange.to.toISOString() : undefined,
+    date_from: toDateParam(dateRange.from),
+    date_to: toDateParam(dateRange.to),
   }), [academicYearFilter, branchFilter, courseFilter, dateRange.from, dateRange.to, instituteFilter, semesterFilter]);
 
   const applicationsQuery = useApplications({
@@ -346,39 +348,12 @@ export default function ApplicationsManagement() {
                 onChange={(event) => setSearchTerm(event.target.value)}
               />
             </div>
-            <Select
-              value={postingTypeFilter}
-              onValueChange={(value) => {
-                setPostingTypeFilter(value);
-                setPostingFilter('all');
-                setPage(1);
-              }}
-              disabled={postingTypesLoading}
-            >
-              <SelectTrigger className="w-full lg:w-52">
-                <SelectValue placeholder="Posting Type" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Posting Types</SelectItem>
-                {postingTypesEmpty ? (
-                  <SelectItem value="__empty__" disabled>
-                    No posting types defined
-                  </SelectItem>
-                ) : (
-                  postingTypeOptions.map((option) => (
-                    <SelectItem key={option.id} value={option.id}>
-                      {option.label}
-                    </SelectItem>
-                  ))
-                )}
-              </SelectContent>
-            </Select>
             <Select value={postingFilter} onValueChange={(value) => { setPostingFilter(value); setPage(1); }}>
               <SelectTrigger className="w-full lg:w-64">
-                <SelectValue placeholder="Filter by posting" />
+                <SelectValue placeholder="Specific Posting (Company · Role)" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All postings</SelectItem>
+                <SelectItem value="all">All specific postings</SelectItem>
                 {postingOptions.map((posting) => (
                   <SelectItem key={posting.id} value={posting.id}>
                     {posting.company.name} - {posting.role_name}
@@ -406,6 +381,7 @@ export default function ApplicationsManagement() {
               branch={{ value: branchFilter, onChange: (value) => { setBranchFilter(value); setPage(1); } }}
               semester={{ value: semesterFilter, onChange: (value) => { setSemesterFilter(value); setPage(1); } }}
               academicYear={{ value: academicYearFilter, onChange: (value) => { setAcademicYearFilter(value); setPage(1); } }}
+              postingType={{ value: postingTypeFilter, onChange: (value) => { setPostingTypeFilter(value); setPostingFilter('all'); setPage(1); }, bind: 'id' }}
               dateRange={{ value: dateRange, onChange: (range) => { setDateRange(range); setPage(1); } }}
             />
           </CardContent>
@@ -420,10 +396,12 @@ export default function ApplicationsManagement() {
                   {applicationsQuery.data?.pagination.total ?? filteredApplications.length} records match the selected filters.
                 </CardDescription>
               </div>
-              <Button variant="outline" onClick={() => setExportOpen(true)}>
-                <Download className="mr-2 h-4 w-4" />
-                Export Excel
-              </Button>
+              {canExport && (
+                <Button variant="outline" onClick={() => setExportOpen(true)}>
+                  <Download className="mr-2 h-4 w-4" />
+                  Export Excel
+                </Button>
+              )}
             </div>
           </CardHeader>
           <CardContent className="p-0 md:p-6">
@@ -455,7 +433,7 @@ export default function ApplicationsManagement() {
                             <div>
                               <p className="font-medium text-foreground">{application.student.full_name}</p>
                               <p className="text-sm text-muted-foreground">
-                                {application.student.enrollment_number} • {application.student.department}
+                                {application.student.enrollment_number} • {application.student.branch ?? application.student.department}
                               </p>
                             </div>
                           </TableCell>

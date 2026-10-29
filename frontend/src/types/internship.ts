@@ -90,6 +90,7 @@ export interface ApiInternshipStudentSummary {
   full_name: string;
   enrollment_number: string;
   department: string;
+  branch?: string | null;
   batch?: string;
   email?: string;
   mobile?: string | null;
@@ -149,9 +150,14 @@ export interface InternshipQueryParams {
   status?: InternshipStatus;
   student_id?: string;
   search?: string;
-  department?: string;
+  institute?: string;
+  course?: string;
+  branch?: string;
+  semester?: string;
+  academic_year?: string;
   batch?: string;
   posting_type?: 'job' | 'internship' | 'stipend_internship';
+  posting_type_master_id?: string;
   internship_type?: InternshipType;
   company_id?: string;
   has_open_issues?: boolean;

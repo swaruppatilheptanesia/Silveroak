@@ -31,6 +31,7 @@ import {
   useIssueNdc,
   useImportNoDuesEligibility,
   useNoDuesDetail,
+  useNoDuesPassingYears,
   useNoDuesRequests,
   useReviewNoDues,
   useUpdateNoDuesRequest,
@@ -328,6 +329,7 @@ export default function NoDuesManagement() {
   const importEligibility = useImportNoDuesEligibility();
   const enableEligibility = useEnableNoDuesEligibility();
 
+  const passingYearsQuery = useNoDuesPassingYears();
   const totalQuery = useNoDuesRequests({ page: 1, limit: 1 });
   const pendingQuery = useNoDuesRequests({ page: 1, limit: 1, status: 'pending_review' });
   const underReviewQuery = useNoDuesRequests({ page: 1, limit: 1, status: 'under_review' });
@@ -426,7 +428,7 @@ export default function NoDuesManagement() {
       }
 
       const headers = [
-        'Student Name', 'Roll Number', 'Department', 'Course', 'Batch', 'Email', 'Mobile',
+        'Student Name', 'Roll Number', 'Branch', 'Course', 'Batch', 'Email', 'Mobile',
         'Exit Reason', 'Company Name', 'Designation', 'Package (LPA)', 'Joining Date',
         'Business Name', 'Business Nature', 'Business Address', 'Institution', 'Program', 'Country',
         'Status', 'NDC Number', 'Declaration Accepted', 'Admin Remarks', 'Reviewed At', 'Issued At',
@@ -436,7 +438,7 @@ export default function NoDuesManagement() {
       const rows = all.map((request) => [
         request.student_name,
         request.roll_number,
-        request.department,
+        request.branch ?? request.department,
         request.course_name ?? '',
         request.batch_year ?? '',
         request.email ?? '',
@@ -764,7 +766,7 @@ export default function NoDuesManagement() {
             institute={{ value: instituteFilter, onChange: (value) => { setInstituteFilter(value); setPage(1); } }}
             course={{ value: courseFilter, onChange: (value) => { setCourseFilter(value); setPage(1); } }}
             branch={{ value: branchFilter, onChange: (value) => { setBranchFilter(value); setPage(1); } }}
-            passingYear={{ value: passingYearFilter, onChange: (value) => { setPassingYearFilter(value); setPage(1); } }}
+            passingYear={{ value: passingYearFilter, onChange: (value) => { setPassingYearFilter(value); setPage(1); }, options: passingYearsQuery.data ?? [] }}
           />
         </div>
 
@@ -800,7 +802,7 @@ export default function NoDuesManagement() {
                           <p className="text-sm text-muted-foreground">
                             {request.roll_number || 'Roll number unavailable'}
                           </p>
-                          <p className="text-xs text-muted-foreground">{request.department || 'Department unavailable'}</p>
+                          <p className="text-xs text-muted-foreground">{request.branch || request.department || 'Branch unavailable'}</p>
                         </div>
                       </TableCell>
                       <TableCell>
@@ -920,7 +922,7 @@ export default function NoDuesManagement() {
                       </div>
                       <p><span className="text-muted-foreground">Name:</span> {selectedRequest.student_name || 'Unavailable'}</p>
                       <p><span className="text-muted-foreground">Roll No:</span> {selectedRequest.roll_number || 'Unavailable'}</p>
-                      <p><span className="text-muted-foreground">Department:</span> {selectedRequest.department || 'Unavailable'}</p>
+                      <p><span className="text-muted-foreground">Branch:</span> {selectedRequest.branch || selectedRequest.department || 'Unavailable'}</p>
                       <p><span className="text-muted-foreground">Course:</span> {selectedRequest.course_name || 'Unavailable'}</p>
                       <p><span className="text-muted-foreground">Batch:</span> {selectedRequest.batch_year || 'Unavailable'}</p>
                       <p><span className="text-muted-foreground">Email:</span> {selectedRequest.email || 'Unavailable'}</p>

@@ -36,23 +36,27 @@ import {
   PaginationPrevious,
 } from '@/components/ui/pagination';
 import { useAuth } from '@/contexts/AuthContext';
+import { hasPermission } from '@/lib/permissionModule';
 import {
   useFacultyStudentDetail,
   useFacultyStudents,
 } from '@/hooks/use-faculty-api';
 import { facultyService } from '@/services/facultyService';
 import { formatApiErrorMessage } from '@/lib/apiError';
-import { formatCGPA, formatDate, getInitials } from '@/lib/formatters';
+import { formatCGPA, formatDate, getInitials, toDateParam } from '@/lib/formatters';
 import { downloadCsvTable, downloadExcelTable } from '@/lib/spreadsheetExport';
 import type { FacultyEligibilityStatus, FacultyStudentListItem } from '@/types/faculty';
 
 // Backend caps the pagination `limit` at 100 (paginationSchema.max(100)), so exports page through
 // the list endpoint at this size rather than one oversized fetch (which 400s).
 const EXPORT_PAGE_SIZE = 100;
-const EXPORT_HEADERS = ['Name', 'Enrollment No', 'Email', 'Department', 'Institute', 'Semester', 'CGPA', 'Backlogs', 'Profile Completion', 'Eligibility Status'];
+const EXPORT_HEADERS = ['Name', 'Enrollment No', 'Email', 'Branch', 'Institute', 'Semester', 'CGPA', 'Backlogs', 'Profile Completion', 'Eligibility Status'];
 
 export default function DepartmentStudents() {
   const { user } = useAuth();
+  // Portfolio tab is gated on the portfolios View permission (the backend now enforces it too), so a
+  // Super Admin revoking faculty portfolio View hides the tab instead of showing a load error.
+  const canViewPortfolio = hasPermission(user?.permissions, { module: 'portfolios', action: 'view' }, user?.role);
   const [searchQuery, setSearchQuery] = useState('');
   const deferredSearch = useDeferredValue(searchQuery);
   const [eligibilityFilter, setEligibilityFilter] = useState<'all' | FacultyEligibilityStatus>('all');
@@ -73,8 +77,8 @@ export default function DepartmentStudents() {
       course: courseFilter || undefined,
       branch: branchFilter || undefined,
       semester: semesterFilter === 'all' ? undefined : semesterFilter,
-      date_from: dateRange.from ? dateRange.from.toISOString() : undefined,
-      date_to: dateRange.to ? dateRange.to.toISOString() : undefined,
+      date_from: toDateParam(dateRange.from),
+      date_to: toDateParam(dateRange.to),
     }),
     [branchFilter, courseFilter, dateRange.from, dateRange.to, deferredSearch, eligibilityFilter, instituteFilter, semesterFilter],
   );
@@ -131,7 +135,7 @@ export default function DepartmentStudents() {
         student.name,
         student.enrollment_number,
         student.email,
-        student.department,
+        student.branch ?? student.department,
         (student as { institute_name?: string | null }).institute_name ?? '',
         student.semester ?? '',
         formatCGPA(student.cgpa, ''),
@@ -383,7 +387,7 @@ export default function DepartmentStudents() {
             <Tabs key={selectedStudent.id} defaultValue="details" className="space-y-4">
               <TabsList>
                 <TabsTrigger value="details">Profile</TabsTrigger>
-                <TabsTrigger value="portfolio">Portfolio</TabsTrigger>
+                {canViewPortfolio && <TabsTrigger value="portfolio">Portfolio</TabsTrigger>}
               </TabsList>
 
               <TabsContent value="details" className="space-y-6">
@@ -470,9 +474,11 @@ export default function DepartmentStudents() {
                 </div>
               </TabsContent>
 
-              <TabsContent value="portfolio">
-                <PortfolioReadOnlyView studentId={selectedStudent.id} />
-              </TabsContent>
+              {canViewPortfolio && (
+                <TabsContent value="portfolio">
+                  <PortfolioReadOnlyView studentId={selectedStudent.id} />
+                </TabsContent>
+              )}
             </Tabs>
           ) : null}
         </DialogContent>

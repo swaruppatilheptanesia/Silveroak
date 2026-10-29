@@ -110,6 +110,12 @@ router.put(
   validate(withdrawInterestRegistrationSchema),
   ctrl.withdrawInterestRegistration
 );
+// Hard-remove a registration (permanent delete, unlike the soft withdraw above).
+router.delete(
+  '/interests/registrations/:id',
+  requirePermission('interest_lists', 'delete'),
+  ctrl.deleteInterestRegistration
+);
 
 // Users
 router.get('/crm/departments', requirePermission('users', 'view'), validate(queryCrmDepartmentsSchema, 'query'), ctrl.getCrmDepartments);

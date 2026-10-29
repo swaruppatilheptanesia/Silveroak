@@ -111,6 +111,13 @@ export function getNocDepartment(record: NocUiRecord) {
   return '—';
 }
 
+/** Real ERP branch for the NOC's student (falls back to the course-derived department). */
+export function getNocBranch(record: NocUiRecord) {
+  if (hasStudent(record)) return record.student.branch ?? record.student.department ?? '—';
+  if (hasLegacyStudentFields(record)) return record.department;
+  return '—';
+}
+
 export function getNocBatch(record: NocUiRecord) {
   if (hasStudent(record)) return record.student.batch ?? '—';
   if (hasLegacyStudentFields(record)) return record.batch;

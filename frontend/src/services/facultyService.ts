@@ -1,4 +1,5 @@
 import { apiClient } from './apiClient';
+import { normalizePagination, type RawPagination } from '@/lib/pagination';
 import { parseApiErrorEnvelope, type ApiErrorDetail } from '@/lib/apiError';
 import type {
   FacultyAssignedProgramsResponse,
@@ -63,10 +64,11 @@ export const facultyService = {
   },
 
   async getStudents(params: FacultyStudentsQueryParams = {}): Promise<FacultyStudentsResponse> {
-    const res = await apiClient.get<FacultyStudentsResponse>(
+    const res = await apiClient.get<Omit<FacultyStudentsResponse, 'pagination'> & { pagination: RawPagination }>(
       `/faculty/students${toQueryString(params as Record<string, unknown>)}`,
     );
-    return throwIfError(res);
+    const payload = throwIfError(res);
+    return { ...payload, pagination: normalizePagination(payload.pagination) };
   },
 
   async getStudentDetail(studentId: string): Promise<FacultyStudentDetail> {

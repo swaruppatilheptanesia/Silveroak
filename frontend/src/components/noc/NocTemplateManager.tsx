@@ -13,7 +13,7 @@ import { Separator } from '@/components/ui/separator';
 import { NocTemplatePreview } from './NocTemplatePreview';
 import { buildDefaultNocTemplatePreviewValues } from '@/lib/nocTemplateModule';
 import { useUpsertAdminNocTemplate } from '@/hooks/use-noc-template-api';
-import { useMasterValues } from '@/hooks/use-master-api';
+import { usePolicyInstituteOptions, usePolicyCourseOptions, usePolicyBranchOptions } from '@/hooks/use-policy-api';
 import { NocTemplateApiError } from '@/services/nocTemplateService';
 import type { ApiMasterOption } from '@/types/master';
 import type { ApiNocTemplate, UpsertNocTemplateInput } from '@/types/nocTemplate';
@@ -58,12 +58,26 @@ export function NocTemplateManager({
   const upsertTemplate = useUpsertAdminNocTemplate();
   const [selectedPostingTypeId, setSelectedPostingTypeId] = useState('');
   const [selectedBranchScope, setSelectedBranchScope] = useState('ALL');
+  // CRM Institute→Course→Branch cascade that sources the branch_scope (real ERP BranchName).
+  const [scopeInstitute, setScopeInstitute] = useState('');
+  const [scopeCourse, setScopeCourse] = useState('');
   const [name, setName] = useState('');
   const [subject, setSubject] = useState('');
   const [bodyHtml, setBodyHtml] = useState('');
   const [pendingSave, setPendingSave] = useState(false);
   const [lastHydratedTemplateKey, setLastHydratedTemplateKey] = useState<string | null>(null);
-  const branchValuesQuery = useMasterValues('branch');
+  const cleanName = (value: string) => value.trim().toLowerCase();
+  const institutesQuery = usePolicyInstituteOptions();
+  const instituteId = useMemo(
+    () => institutesQuery.data?.find((o) => cleanName(o.name) === cleanName(scopeInstitute))?.id ?? null,
+    [institutesQuery.data, scopeInstitute],
+  );
+  const coursesQuery = usePolicyCourseOptions(instituteId);
+  const courseId = useMemo(
+    () => coursesQuery.data?.find((o) => cleanName(o.name) === cleanName(scopeCourse))?.id ?? null,
+    [coursesQuery.data, scopeCourse],
+  );
+  const branchesQuery = usePolicyBranchOptions(courseId);
 
   const selectedPostingType = useMemo(
     () => getPostingTypeValue(postingTypes, selectedPostingTypeId),
@@ -87,31 +101,35 @@ export function NocTemplateManager({
     [postingTypes]
   );
 
+  const instituteOptions = useMemo(
+    () => (institutesQuery.data ?? []).map((o) => ({ value: o.name, label: o.name })),
+    [institutesQuery.data],
+  );
+  const courseOptions = useMemo(
+    () => (coursesQuery.data ?? []).map((o) => ({ value: o.name, label: o.name })),
+    [coursesQuery.data],
+  );
   const branchOptions = useMemo(() => {
-    const liveValues = branchValuesQuery.data ?? [];
     const seen = new Set<string>();
-
     const options = [
-      {
-        value: 'ALL',
-        label: 'All Branches',
-        description: 'Applies to every branch',
-        keywords: ['all', 'branch'],
-      },
-      ...liveValues.map((branch) => ({
-        value: branch,
-        label: branch,
-        keywords: [branch],
-      })),
+      { value: 'ALL', label: 'All Branches', description: 'Applies to every branch', keywords: ['all', 'branch'] },
+      ...(branchesQuery.data ?? []).map((o) => ({ value: o.name, label: o.name, keywords: [o.name] })),
     ];
-
+    // Keep the currently-selected scope visible on edit-load (e.g. a legacy value or a branch from another course).
+    if (
+      selectedBranchScope
+      && normalizeScopeValue(selectedBranchScope) !== 'all'
+      && !options.some((option) => normalizeScopeValue(option.value) === normalizeScopeValue(selectedBranchScope))
+    ) {
+      options.push({ value: selectedBranchScope, label: selectedBranchScope, description: 'Current template scope', keywords: [selectedBranchScope] });
+    }
     return options.filter((option) => {
       const normalized = normalizeScopeValue(option.value);
       if (seen.has(normalized)) return false;
       seen.add(normalized);
       return true;
     });
-  }, [branchValuesQuery.data]);
+  }, [branchesQuery.data, selectedBranchScope]);
 
   const previewValues = useMemo(() => ({
     ...defaultPreviewValues,
@@ -249,17 +267,45 @@ export function NocTemplateManager({
 
           <div className="space-y-2">
             <Label>Branch Scope</Label>
-            <SearchableSelect
-              options={branchOptions}
-              value={selectedBranchScope}
-              onValueChange={setSelectedBranchScope}
-              placeholder="Select branch scope"
-              searchPlaceholder="Search branches..."
-              emptyMessage="No branch masters found."
-              loadingMessage="Loading branches..."
-              isLoading={branchValuesQuery.isLoading}
-              contentClassName="w-[min(36rem,calc(100vw-2rem))]"
-            />
+            <p className="text-xs text-muted-foreground">
+              Pick Institute → Course to load its ERP branches, or choose "All Branches".
+            </p>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+              <SearchableSelect
+                options={instituteOptions}
+                value={scopeInstitute}
+                onValueChange={(value) => { setScopeInstitute(value); setScopeCourse(''); }}
+                placeholder="Institute"
+                searchPlaceholder="Search institute..."
+                emptyMessage="No institutes found."
+                loadingMessage="Loading institutes..."
+                isLoading={institutesQuery.isLoading}
+                clearable
+              />
+              <SearchableSelect
+                options={courseOptions}
+                value={scopeCourse}
+                onValueChange={setScopeCourse}
+                placeholder={instituteId ? 'Course' : 'Select institute first'}
+                searchPlaceholder="Search course..."
+                emptyMessage="No courses found."
+                loadingMessage="Loading courses..."
+                disabled={instituteId === null || coursesQuery.isLoading}
+                isLoading={coursesQuery.isLoading}
+                clearable
+              />
+              <SearchableSelect
+                options={branchOptions}
+                value={selectedBranchScope}
+                onValueChange={setSelectedBranchScope}
+                placeholder="Branch scope"
+                searchPlaceholder="Search branches..."
+                emptyMessage={courseId ? 'No branches found.' : 'Select course, or pick All Branches.'}
+                loadingMessage="Loading branches..."
+                isLoading={branchesQuery.isLoading}
+                contentClassName="w-[min(36rem,calc(100vw-2rem))]"
+              />
+            </div>
           </div>
 
           <div className="space-y-2">

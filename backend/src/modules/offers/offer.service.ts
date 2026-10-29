@@ -116,7 +116,7 @@ export async function getOffers(
       ...buildPrismaQuery(page, limit),
       orderBy: getOfferOrderBy(sort_by, sort_order),
       include: {
-        student: { select: { id: true, full_name: true, enrollment_number: true, department: true, batch: true, institute: true, course: true, current_semester: true } },
+        student: { select: { id: true, full_name: true, enrollment_number: true, department: true, branch: true, batch: true, institute: true, course: true, current_semester: true } },
         company: { select: { id: true, name: true } },
         posting: { select: { id: true, title: true, posting_type_master: { select: { value: true } } } },
       },
@@ -144,7 +144,7 @@ export async function getOfferById(
       ...buildOfferWhere(user.tenant_id, {}, user, scope),
     },
     include: {
-      student: { select: { id: true, full_name: true, enrollment_number: true, department: true, batch: true } },
+      student: { select: { id: true, full_name: true, enrollment_number: true, department: true, branch: true, batch: true } },
       company: { select: { id: true, name: true } },
       posting: { select: { id: true, title: true, posting_type_master: { select: { value: true } } } },
       audit_trail: { orderBy: { performed_at: 'desc' } },

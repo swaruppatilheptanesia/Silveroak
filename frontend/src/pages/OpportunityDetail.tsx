@@ -138,7 +138,8 @@ export default function OpportunityDetail() {
     institute: student?.institute ?? '',
     course: student?.course ?? '',
     semester: academic?.semester ?? null,
-    department: student?.department ?? '',
+    // Eligibility branch-matching uses the real ERP branch (falls back to course-derived department).
+    department: student?.branch ?? student?.department ?? '',
     batch: student?.batch ?? '',
     cgpa: academic?.cgpa ?? null,
     backlog_count: academic?.backlog_count ?? 0,
@@ -221,8 +222,20 @@ export default function OpportunityDetail() {
       reasons.push('The application window is currently closed.');
     }
 
-    if ((myOffersQuery.data?.length ?? 0) > 0) {
-      reasons.push('You already have an offer on record; applications are locked.');
+    // A non-rejected, non-overridden offer for THIS posting type locks applications for it —
+    // other posting types stay open (per-type offer lock, mirrors the backend offer-block).
+    if (postingData?.type) {
+      const postingTypeKey = postingData.type.trim().toLowerCase();
+      const hasBlockingOffer = (myOffersQuery.data ?? []).some(
+        (offer) =>
+          offer.status !== 'rejected_by_student' &&
+          offer.status !== 'rejected_by_admin' &&
+          !offer.admin_override_enabled &&
+          offer.posting.type.trim().toLowerCase() === postingTypeKey,
+      );
+      if (hasBlockingOffer) {
+        reasons.push('You already have an active offer for this posting type; applications for it are locked.');
+      }
     }
 
     // Placement opt-out (global or for this posting's type) blocks applying — posting stays visible.
@@ -540,7 +553,7 @@ export default function OpportunityDetail() {
                         </div>
                         <p className="mt-1 text-sm text-muted-foreground">
                           {student.enrollment_number}
-                          {student.department ? ` • ${student.department}` : ''}
+                          {(student.branch ?? student.department) ? ` • ${student.branch ?? student.department}` : ''}
                           {student.batch ? ` • Batch ${student.batch}` : ''}
                         </p>
                         <p className="mt-1 text-sm text-muted-foreground">

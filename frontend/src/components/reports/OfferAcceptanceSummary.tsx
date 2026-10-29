@@ -54,9 +54,9 @@ export default function OfferAcceptanceSummary() {
   const totals = data?.stats ?? { total: 0, pending: 0, accepted: 0, rejected: 0, rate: 0 };
 
   const handleExport = () => {
-    const csv = `Student,Enrollment,Department,Batch,Company,Role,CTC/Stipend,Offer Date,Status\n` +
+    const csv = `Student,Enrollment,Branch,Batch,Company,Role,CTC/Stipend,Offer Date,Status\n` +
       offers.map((offer: any) =>
-        `${offer.student_name},${offer.enrollment_number},${offer.department},${offer.batch},${offer.company_name},${offer.role},${offer.ctc || offer.stipend || '-'},${new Date(offer.offer_date).toLocaleDateString('en-IN')},${OFFER_STATUS_CONFIG[offer.status as keyof typeof OFFER_STATUS_CONFIG]?.label ?? offer.status}`
+        `${offer.student_name},${offer.enrollment_number},${offer.branch},${offer.batch},${offer.company_name},${offer.role},${offer.ctc || offer.stipend || '-'},${new Date(offer.offer_date).toLocaleDateString('en-IN')},${OFFER_STATUS_CONFIG[offer.status as keyof typeof OFFER_STATUS_CONFIG]?.label ?? offer.status}`
       ).join('\n');
     downloadCSV(csv, 'offer_acceptance_summary');
   };

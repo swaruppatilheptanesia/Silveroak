@@ -22,12 +22,74 @@ type MasterOptionWithTargets = {
   target_branches: string[];
   target_semesters: string[];
   target_academic_years: string[];
+  // Prisma returns this Json column as JsonValue; parse via parseScopeRows before use.
+  scope_rows: unknown;
   is_active: boolean;
   accepting_applications: boolean;
   created_by: string | null;
   created_at: Date;
   updated_at: Date;
 };
+
+type ScopeRow = { institute: string; course: string; branch: string; semesters: string[] };
+
+// Prisma types `scope_rows` as `JsonValue`; coerce it back to the well-known row shape,
+// dropping any malformed entries defensively.
+function parseScopeRows(value: unknown): ScopeRow[] {
+  if (!Array.isArray(value)) return [];
+  const rows: ScopeRow[] = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== 'object') continue;
+    const { institute, course, branch, semesters } = entry as {
+      institute?: unknown;
+      course?: unknown;
+      branch?: unknown;
+      semesters?: unknown;
+    };
+    if (
+      typeof institute !== 'string'
+      || typeof course !== 'string'
+      || typeof branch !== 'string'
+      || !Array.isArray(semesters)
+    ) {
+      continue;
+    }
+    rows.push({
+      institute,
+      course,
+      branch,
+      semesters: semesters.filter((s): s is string => typeof s === 'string'),
+    });
+  }
+  return rows;
+}
+
+// Normalise inbound rows from the client: clean each cell, drop rows missing any cell or with no
+// semesters, dedupe semesters within a row.
+function normalizeScopeRows(rows: ScopeRow[] | undefined): ScopeRow[] {
+  if (!rows) return [];
+  const result: ScopeRow[] = [];
+  for (const row of rows) {
+    const [institute] = uniqueNormalizedValues([row?.institute]);
+    const [course] = uniqueNormalizedValues([row?.course]);
+    const [branch] = uniqueNormalizedValues([row?.branch]);
+    const semesters = uniqueNormalizedValues(row?.semesters ?? []);
+    if (!institute || !course || !branch || semesters.length === 0) continue;
+    result.push({ institute, course, branch, semesters });
+  }
+  return result;
+}
+
+// The flat target_* arrays are kept as the union of the rows so existing flat-array consumers
+// (faculty program mapping, event pipeline inheritance) keep working.
+function deriveFlatTargetsFromRows(rows: ScopeRow[]) {
+  return {
+    target_institutes: uniqueNormalizedValues(rows.map((row) => row.institute)),
+    target_courses: uniqueNormalizedValues(rows.map((row) => row.course)),
+    target_branches: uniqueNormalizedValues(rows.map((row) => row.branch)),
+    target_semesters: uniqueNormalizedValues(rows.flatMap((row) => row.semesters)),
+  };
+}
 
 const ensuredTenantMasterSeeds = new Set<string>();
 const ensuredTenantPolicyCategorySeedVersions = new Map<string, number>();
@@ -188,6 +250,10 @@ function mapMasterOption(
     target_academic_years: masterOption.target_academic_years,
     created_at: masterOption.created_at,
     updated_at: masterOption.updated_at,
+    // posting_type only: cascading targeting rows (see schema.prisma / normalizeScopeRows).
+    ...(masterOption.category === 'posting_type'
+      ? { scope_rows: parseScopeRows(masterOption.scope_rows) }
+      : {}),
     // Only posting_type options carry the list of companies that have used the type.
     ...(masterOption.category === 'posting_type' ? { companies: companies ?? [] } : {}),
     // posting_type only: Application Receiving toggle (visible-but-blocked when false).
@@ -205,7 +271,7 @@ async function getStudentTargetContext(userId: string): Promise<StudentTargetCon
     select: {
       institute: true,
       course: true,
-      department: true,
+      branch: true,
       academic_profile: {
         select: {
           semester: true,
@@ -221,7 +287,7 @@ async function getStudentTargetContext(userId: string): Promise<StudentTargetCon
   return {
     institute: student.institute ?? null,
     course: student.course ?? null,
-    branch: student.department ?? null,
+    branch: student.branch ?? null,
     semester: student.academic_profile?.semester ?? null,
   };
 }
@@ -336,18 +402,9 @@ export async function ensureTenantMastersSeeded(tenantId: string) {
         value,
         normalized_value: normalizeMasterValue(value),
       })),
-      ...uniqueNormalizedValues([
-        ...students.map((student) => student.department),
-        ...postings.flatMap((posting) => posting.eligible_branches),
-        ...eligibilityRules.flatMap((rule) => rule.eligible_branches),
-        ...announcements.flatMap((announcement) => announcement.target_departments),
-        ...internships.map((internship) => internship.department),
-      ]).map((value) => ({
-        tenant_id: tenantId,
-        category: 'branch' as const,
-        value,
-        normalized_value: normalizeMasterValue(value),
-      })),
+      // NOTE: the 'branch' MasterCategory (Source-B, course-derived) is retired — student branch now comes
+      // from the ERP (Student.branch). NOC template branch scope uses the CRM Institute→Course→Branch cascade.
+      // (The students/eligibilityRules/announcements/internships fetches above are now only kept for other seeds.)
       ...uniqueNormalizedValues([
         ...postings.map((posting) => posting.academic_year),
         ...engagements.map((engagement) => engagement.academic_year),
@@ -515,17 +572,27 @@ export async function createMaster(tenantId: string, actor: MasterActor, data: C
     throw new ConflictError('This master value already exists in the selected category', 'MASTER_OPTION_EXISTS');
   }
 
+  const scopeRows = normalizeScopeRows(data.scope_rows);
+  // When cascading rows are defined they are the source of truth; derive the flat target_* union from
+  // them (keeps faculty/event flat-array consumers working). Otherwise honour any flat arrays sent directly.
+  const derivedFlatTargets = scopeRows.length > 0 ? deriveFlatTargetsFromRows(scopeRows) : null;
+
   const created = await prisma.masterOption.create({
     data: {
       tenant_id: tenantId,
       category: data.category,
       value: cleanedValue,
       normalized_value: normalizedValue,
-      target_institutes: data.target_institutes ? uniqueNormalizedValues(data.target_institutes) : [],
-      target_courses: data.target_courses ? uniqueNormalizedValues(data.target_courses) : [],
-      target_branches: data.target_branches ? uniqueNormalizedValues(data.target_branches) : [],
-      target_semesters: data.target_semesters ? uniqueNormalizedValues(data.target_semesters) : [],
+      target_institutes: derivedFlatTargets?.target_institutes
+        ?? (data.target_institutes ? uniqueNormalizedValues(data.target_institutes) : []),
+      target_courses: derivedFlatTargets?.target_courses
+        ?? (data.target_courses ? uniqueNormalizedValues(data.target_courses) : []),
+      target_branches: derivedFlatTargets?.target_branches
+        ?? (data.target_branches ? uniqueNormalizedValues(data.target_branches) : []),
+      target_semesters: derivedFlatTargets?.target_semesters
+        ?? (data.target_semesters ? uniqueNormalizedValues(data.target_semesters) : []),
       target_academic_years: data.target_academic_years ? uniqueNormalizedValues(data.target_academic_years) : [],
+      scope_rows: scopeRows,
       is_active: data.is_active ?? true,
       accepting_applications: data.accepting_applications ?? true,
       created_by: actor.id,
@@ -572,6 +639,14 @@ export async function updateMaster(masterId: string, tenantId: string, actor: Ma
     }
   }
 
+  // Cascading rows are the source of truth when provided. Non-empty rows also overwrite the flat target_*
+  // arrays with their derived union; empty rows (a rename with no rows, or a legacy type) leave the flat
+  // arrays untouched so existing targeting isn't wiped.
+  const normalizedRows = data.scope_rows !== undefined ? normalizeScopeRows(data.scope_rows) : null;
+  const derivedFlatTargets = normalizedRows && normalizedRows.length > 0
+    ? deriveFlatTargetsFromRows(normalizedRows)
+    : null;
+
   const updated = await prisma.masterOption.update({
     where: { id: masterId },
     data: {
@@ -581,21 +656,31 @@ export async function updateMaster(masterId: string, tenantId: string, actor: Ma
             normalized_value: nextNormalizedValue,
           }
         : {}),
-      ...(data.target_institutes !== undefined
-        ? { target_institutes: uniqueNormalizedValues(data.target_institutes) }
-        : {}),
-      ...(data.target_courses !== undefined
-        ? { target_courses: uniqueNormalizedValues(data.target_courses) }
-        : {}),
-      ...(data.target_branches !== undefined
-        ? { target_branches: uniqueNormalizedValues(data.target_branches) }
-        : {}),
-      ...(data.target_semesters !== undefined
-        ? { target_semesters: uniqueNormalizedValues(data.target_semesters) }
-        : {}),
+      ...(derivedFlatTargets
+        ? {
+            target_institutes: derivedFlatTargets.target_institutes,
+            target_courses: derivedFlatTargets.target_courses,
+            target_branches: derivedFlatTargets.target_branches,
+            target_semesters: derivedFlatTargets.target_semesters,
+          }
+        : {
+            ...(data.target_institutes !== undefined
+              ? { target_institutes: uniqueNormalizedValues(data.target_institutes) }
+              : {}),
+            ...(data.target_courses !== undefined
+              ? { target_courses: uniqueNormalizedValues(data.target_courses) }
+              : {}),
+            ...(data.target_branches !== undefined
+              ? { target_branches: uniqueNormalizedValues(data.target_branches) }
+              : {}),
+            ...(data.target_semesters !== undefined
+              ? { target_semesters: uniqueNormalizedValues(data.target_semesters) }
+              : {}),
+          }),
       ...(data.target_academic_years !== undefined
         ? { target_academic_years: uniqueNormalizedValues(data.target_academic_years) }
         : {}),
+      ...(normalizedRows !== null ? { scope_rows: normalizedRows } : {}),
       ...(data.is_active !== undefined ? { is_active: data.is_active } : {}),
       ...(data.accepting_applications !== undefined
         ? { accepting_applications: data.accepting_applications }

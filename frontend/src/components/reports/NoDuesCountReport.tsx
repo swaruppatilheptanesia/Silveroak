@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useNoDuesCountReport } from '@/hooks/use-report-analytics-api';
+import { formatDate } from '@/lib/formatters';
 import { EXIT_REASON_LABELS } from '@/types/noDues';
 import ReportScopeFilters from './ReportScopeFilters';
 import ReportExportHeader from './ReportExportHeader';
@@ -28,12 +29,13 @@ export default function NoDuesCountReport() {
   const rows: any[] = data?.rows ?? [];
 
   const headers = [
-    'Passing Year', 'Institute', 'Course', 'Branch', 'Semester', 'Total Students', 'No-Due Count',
+    'Passing Year', 'Passout Date', 'Institute', 'Course', 'Branch', 'Semester', 'Total Students', 'No-Due Count',
     EXIT_REASON_LABELS.employment, EXIT_REASON_LABELS.family_business, EXIT_REASON_LABELS.planning_studies,
     EXIT_REASON_LABELS.higher_studies, EXIT_REASON_LABELS.competitive_exam,
   ];
   const exportRows = rows.map((row) => [
-    row.passing_year, row.institute, row.course, row.branch, row.semester, row.total_students, row.no_due_count,
+    row.passing_year, row.pass_out_date && row.pass_out_date !== '—' ? formatDate(row.pass_out_date) : '—',
+    row.institute, row.course, row.branch, row.semester, row.total_students, row.no_due_count,
     row.employment, row.family_business, row.planning_studies, row.higher_studies, row.competitive_exam,
   ]);
 
@@ -67,6 +69,7 @@ export default function NoDuesCountReport() {
                   rows.map((row, index) => (
                     <TableRow key={index}>
                       <TableCell className="font-medium whitespace-nowrap">{fmt(row.passing_year)}</TableCell>
+                      <TableCell className="whitespace-nowrap">{row.pass_out_date && row.pass_out_date !== '—' ? formatDate(row.pass_out_date) : '—'}</TableCell>
                       <TableCell>{fmt(row.institute)}</TableCell>
                       <TableCell>{fmt(row.course)}</TableCell>
                       <TableCell>{fmt(row.branch)}</TableCell>

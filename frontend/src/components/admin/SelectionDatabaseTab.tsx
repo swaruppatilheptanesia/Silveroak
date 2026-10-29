@@ -10,10 +10,9 @@ import { useClientSort } from '@/hooks/use-client-sort';
 import { ReportToolbar, type DateRange } from '@/components/reports/ReportToolbar';
 import { downloadCsvTable } from '@/lib/spreadsheetExport';
 import AdminListScopeFilters from '@/components/admin/AdminListScopeFilters';
-import { Lock, Briefcase, GraduationCap, Search, CheckCircle2, XCircle, Clock } from 'lucide-react';
+import { Lock, Briefcase, Search, CheckCircle2, XCircle, Clock } from 'lucide-react';
 import { format } from 'date-fns';
 import { useAdminSelectionDatabase } from '@/hooks/use-admin-api';
-import { usePostingTypeOptions } from '@/hooks/use-posting-type-options';
 import { formatPostingTypeLabel } from '@/lib/postingModule';
 
 type SelectionRecord = {
@@ -21,6 +20,7 @@ type SelectionRecord = {
   student_name: string;
   enrollment_number: string;
   department: string;
+  branch?: string | null;
   batch: string;
   company_name: string;
   role: string;
@@ -62,7 +62,6 @@ const NocStatusBadge = ({ status }: { status: SelectionRecord['noc_status'] }) =
 export default function SelectionDatabaseTab() {
   const [subTab, setSubTab] = useState<'placements' | 'internships'>('placements');
   const [search, setSearch] = useState('');
-  const [deptFilter, setDeptFilter] = useState('all');
   const [batchFilter, setBatchFilter] = useState('all');
   const [postingTypeFilter, setPostingTypeFilter] = useState('all');
   const [companyFilter, setCompanyFilter] = useState('all');
@@ -73,7 +72,8 @@ export default function SelectionDatabaseTab() {
   const [branchFilter, setBranchFilter] = useState('');
   const [academicYearFilter, setAcademicYearFilter] = useState('all');
 
-  const selectionType = subTab === 'placements' ? 'placement' : 'internship';
+  // Combined view: no type filter → backend returns BOTH placement and internship records.
+  const selectionType = undefined;
 
   const summaryParams = useMemo(() => ({
     type: selectionType,
@@ -82,7 +82,6 @@ export default function SelectionDatabaseTab() {
   const filteredParams = useMemo(() => ({
     type: selectionType,
     search: search || undefined,
-    department: deptFilter === 'all' ? undefined : deptFilter,
     batch: batchFilter === 'all' ? undefined : batchFilter,
     posting_type: postingTypeFilter === 'all' ? undefined : postingTypeFilter,
     company: companyFilter === 'all' ? undefined : companyFilter,
@@ -93,7 +92,7 @@ export default function SelectionDatabaseTab() {
     course: courseFilter || undefined,
     branch: branchFilter || undefined,
     academic_year: academicYearFilter === 'all' ? undefined : academicYearFilter,
-  }), [academicYearFilter, batchFilter, branchFilter, companyFilter, courseFilter, dateRange.from, dateRange.to, deptFilter, instituteFilter, outcomeFilter, postingTypeFilter, search, selectionType]);
+  }), [academicYearFilter, batchFilter, branchFilter, companyFilter, courseFilter, dateRange.from, dateRange.to, instituteFilter, outcomeFilter, postingTypeFilter, search, selectionType]);
 
   const summaryQuery = useAdminSelectionDatabase(summaryParams);
   const filteredQuery = useAdminSelectionDatabase(filteredParams);
@@ -108,7 +107,7 @@ export default function SelectionDatabaseTab() {
   );
   const { sorted: sortedRecords, sort_by, sort_order, onSort } = useClientSort(filteredRecords, {
     student: (r) => r.student_name,
-    department: (r) => r.department,
+    branch: (r) => r.branch ?? '',
     batch: (r) => r.batch,
     company: (r) => r.company_name,
     role: (r) => r.role,
@@ -129,10 +128,6 @@ export default function SelectionDatabaseTab() {
   const placementCount = summaryQuery.data?.counts.placements ?? 0;
   const internshipCount = summaryQuery.data?.counts.internships ?? 0;
 
-  const departments = useMemo(
-    () => [...new Set(summaryRecords.map((record) => record.department))].sort(),
-    [summaryRecords],
-  );
   const batches = useMemo(
     () => [...new Set(summaryRecords.map((record) => record.batch))].sort(),
     [summaryRecords],
@@ -141,7 +136,6 @@ export default function SelectionDatabaseTab() {
     () => [...new Set(summaryRecords.map((record) => record.company_name))].sort(),
     [summaryRecords],
   );
-  const { options: postingTypeOptions, isLoading: postingTypesLoading, isEmpty: postingTypesEmpty } = usePostingTypeOptions();
 
   const handleExportCSV = () => {
     const headers = [
@@ -157,7 +151,7 @@ export default function SelectionDatabaseTab() {
       record.enrollment_number,
       record.institute ?? '',
       record.course ?? '',
-      record.department,
+      record.branch ?? '',
       record.semester ?? '',
       record.cgpa ?? '',
       record.twelfth_percentage ?? '',
@@ -171,12 +165,12 @@ export default function SelectionDatabaseTab() {
       record.selection_date,
       nocStatusLabel(record.noc_status),
     ]);
-    downloadCsvTable(headers, rows, `selection-database-${subTab}`);
+    downloadCsvTable(headers, rows, 'selection-database');
   };
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Card>
           <CardContent className="px-4 pb-3 pt-4">
             <p className="text-xs text-muted-foreground">Total Records</p>
@@ -201,47 +195,24 @@ export default function SelectionDatabaseTab() {
             <p className="text-2xl font-bold text-muted-foreground">{stats.pending}</p>
           </CardContent>
         </Card>
-        <Card>
-          <CardContent className="px-4 pb-3 pt-4">
-            <p className="flex items-center gap-1 text-xs text-muted-foreground"><Lock className="h-3 w-3" /> Finalized</p>
-            <p className="text-2xl font-bold">{stats.locked}</p>
-          </CardContent>
-        </Card>
       </div>
 
       <Tabs value={subTab} onValueChange={(value) => setSubTab(value as 'placements' | 'internships')}>
         <TabsList>
           <TabsTrigger value="placements" className="gap-1.5">
-            <Briefcase className="h-3.5 w-3.5" /> Placements
-            <Badge variant="secondary" className="ml-1 h-5 px-1.5 text-[10px]">{placementCount}</Badge>
-          </TabsTrigger>
-          <TabsTrigger value="internships" className="gap-1.5">
-            <GraduationCap className="h-3.5 w-3.5" /> Internships
-            <Badge variant="secondary" className="ml-1 h-5 px-1.5 text-[10px]">{internshipCount}</Badge>
+            <Briefcase className="h-3.5 w-3.5" /> Placements/Internships
+            <Badge variant="secondary" className="ml-1 h-5 px-1.5 text-[10px]">{placementCount + internshipCount}</Badge>
           </TabsTrigger>
         </TabsList>
       </Tabs>
 
       <ReportToolbar
-        title={subTab === 'placements' ? 'Placed Students Database' : 'Internship Selections Database'}
+        title="Placement & Internship Database"
         totalRecords={filteredRecords.length}
         dateRange={dateRange}
         onDateRangeChange={setDateRange}
         onExportCSV={handleExportCSV}
       >
-        <Select value={deptFilter} onValueChange={setDeptFilter}>
-          <SelectTrigger className="h-9 w-[140px] text-xs">
-            <SelectValue placeholder="Department" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Depts</SelectItem>
-            {departments.map((department) => (
-              <SelectItem key={department} value={department}>
-                {department}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
         <Select value={batchFilter} onValueChange={setBatchFilter}>
           <SelectTrigger className="h-9 w-[100px] text-xs">
             <SelectValue placeholder="Batch" />
@@ -268,25 +239,6 @@ export default function SelectionDatabaseTab() {
             ))}
           </SelectContent>
         </Select>
-        <Select value={postingTypeFilter} onValueChange={setPostingTypeFilter} disabled={postingTypesLoading}>
-          <SelectTrigger className="h-9 w-[150px] text-xs">
-            <SelectValue placeholder="Posting Type" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Posting Types</SelectItem>
-            {postingTypesEmpty ? (
-              <SelectItem value="__empty__" disabled>
-                No posting types defined
-              </SelectItem>
-            ) : (
-              postingTypeOptions.map((option) => (
-                <SelectItem key={option.value} value={option.value}>
-                  {option.label}
-                </SelectItem>
-              ))
-            )}
-          </SelectContent>
-        </Select>
         <Select value={outcomeFilter} onValueChange={setOutcomeFilter}>
           <SelectTrigger className="h-9 w-[120px] text-xs">
             <SelectValue placeholder="Outcome" />
@@ -305,6 +257,7 @@ export default function SelectionDatabaseTab() {
         course={{ value: courseFilter, onChange: setCourseFilter }}
         branch={{ value: branchFilter, onChange: setBranchFilter }}
         academicYear={{ value: academicYearFilter, onChange: setAcademicYearFilter }}
+        postingType={{ value: postingTypeFilter, onChange: setPostingTypeFilter, bind: 'value' }}
       />
 
       <div className="relative max-w-sm">
@@ -325,7 +278,7 @@ export default function SelectionDatabaseTab() {
                 <TableRow>
                   <TableHead className="w-8"></TableHead>
                   <SortableTableHead label="Student" columnKey="student" sortBy={sort_by} sortOrder={sort_order} onSort={onSort} />
-                  <SortableTableHead label="Department" columnKey="department" sortBy={sort_by} sortOrder={sort_order} onSort={onSort} />
+                  <SortableTableHead label="Branch" columnKey="branch" sortBy={sort_by} sortOrder={sort_order} onSort={onSort} />
                   <SortableTableHead label="Batch" columnKey="batch" sortBy={sort_by} sortOrder={sort_order} onSort={onSort} />
                   <SortableTableHead label="Company" columnKey="company" sortBy={sort_by} sortOrder={sort_order} onSort={onSort} />
                   <SortableTableHead label="Role" columnKey="role" sortBy={sort_by} sortOrder={sort_order} onSort={onSort} />
@@ -362,7 +315,7 @@ export default function SelectionDatabaseTab() {
                           <p className="text-xs text-muted-foreground">{record.enrollment_number}</p>
                         </div>
                       </TableCell>
-                      <TableCell className="text-sm">{record.department}</TableCell>
+                      <TableCell className="text-sm">{record.branch ?? '—'}</TableCell>
                       <TableCell className="text-sm">{record.batch}</TableCell>
                       <TableCell className="text-sm font-medium">{record.company_name}</TableCell>
                       <TableCell className="text-sm">{record.role}</TableCell>

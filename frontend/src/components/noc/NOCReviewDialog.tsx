@@ -30,8 +30,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { useFacultyApproveNoc, useIssueNoc, useNocDetail, useRejectNoc, useTpoApproveNoc } from '@/hooks/use-noc-api';
 import {
   getNocBatch,
+  getNocBranch,
   getNocCompanyLocation,
-  getNocDepartment,
   getNocEmail,
   getNocFacultyApproverName,
   getNocMobile,
@@ -100,7 +100,7 @@ export function NOCReviewDialog({
       templatesQuery.data?.find(
         (item) =>
           item.posting_type_master.value === request.program
-          && item.branch_scope === request.student.department
+          && (item.branch_scope === request.student.branch || item.branch_scope === request.student.department)
       )
       ?? templatesQuery.data?.find(
         (item) =>
@@ -222,6 +222,10 @@ export function NOCReviewDialog({
                     <Badge className={NOC_STATUS_CONFIG[request.status].color}>
                       {NOC_STATUS_CONFIG[request.status].label}
                     </Badge>
+                    <Badge variant={request.is_active === false ? 'outline' : 'default'}>
+                      {request.is_active === false ? 'Inactive' : 'Active'}
+                    </Badge>
+                    {request.is_reissue ? <Badge variant="secondary">Re-Issued</Badge> : null}
                   </div>
                   <h2 className="text-xl font-semibold text-foreground">{request.role_title}</h2>
                   <p className="text-sm text-muted-foreground">{request.company_name}</p>
@@ -256,7 +260,7 @@ export function NOCReviewDialog({
                   <div className="space-y-2 text-sm">
                     <p className="font-medium text-foreground">{getNocStudentName(request)}</p>
                     <p className="text-muted-foreground">{request.student.enrollment_number}</p>
-                    <p>{getNocDepartment(request)}</p>
+                    <p>{getNocBranch(request)}</p>
                     <p>Batch: {getNocBatch(request)}</p>
                     <p className="flex items-center gap-2">
                       <Mail className="h-3.5 w-3.5 text-muted-foreground" />
@@ -290,8 +294,27 @@ export function NOCReviewDialog({
                       <p>PAN / GST: {[request.company_pan, request.company_gst].filter(Boolean).join(' · ')}</p>
                     )}
                     <p>Status: {request.company_verification_status}</p>
-                    <p>Contact: {request.contact_person_name || 'Not provided'}</p>
-                    <p>{request.contact_person_email || request.contact_person_phone || 'No contact details provided'}</p>
+                    <div className="mt-3 space-y-1 border-t border-border pt-3">
+                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                        Recruiter Details
+                      </p>
+                      <p>
+                        <span className="text-muted-foreground">Name: </span>
+                        {request.contact_person_name || 'Not provided'}
+                      </p>
+                      <p>
+                        <span className="text-muted-foreground">Designation: </span>
+                        {request.contact_person_designation || 'Not provided'}
+                      </p>
+                      <p>
+                        <span className="text-muted-foreground">Contact: </span>
+                        {request.contact_person_phone || 'Not provided'}
+                      </p>
+                      <p>
+                        <span className="text-muted-foreground">Email: </span>
+                        {request.contact_person_email || 'Not provided'}
+                      </p>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -311,7 +334,9 @@ export function NOCReviewDialog({
                   {request.internship_type && (
                     <div className="text-sm">
                       <p className="text-muted-foreground">Internship Type</p>
-                      <p className="font-medium capitalize text-foreground">{request.internship_type}</p>
+                      <p className="font-medium capitalize text-foreground">
+                        {request.internship_type === 'internship_placement' ? 'Internship + Placement' : request.internship_type}
+                      </p>
                     </div>
                   )}
                   <div className="text-sm">
@@ -330,6 +355,20 @@ export function NOCReviewDialog({
                       {stipendAmount !== null ? `₹${stipendAmount.toLocaleString('en-IN')}/month` : 'Not provided'}
                     </p>
                   </div>
+                  {request.is_reissue && (
+                    <>
+                      <div className="text-sm">
+                        <p className="text-muted-foreground">Previous NOC Request Number</p>
+                        <p className="font-medium text-foreground">
+                          {request.previous_noc?.noc_number || request.noc_number || '—'}
+                        </p>
+                      </div>
+                      <div className="text-sm">
+                        <p className="text-muted-foreground">Reason for Company Change</p>
+                        <p className="font-medium text-foreground">{request.reason_for_company_change || '—'}</p>
+                      </div>
+                    </>
+                  )}
                 </div>
                 {request.job_description && (
                   <div className="mt-4 text-sm">
@@ -337,13 +376,21 @@ export function NOCReviewDialog({
                     <p className="mt-1 text-foreground">{request.job_description}</p>
                   </div>
                 )}
-                {(request.offer_letter_url || request.supporting_document_url) && (
+                {(request.offer_letter_url || request.supporting_document_url || request.termination_letter_url) && (
                   <div className="mt-4 flex flex-wrap gap-2">
                     {request.offer_letter_url && (
                       <Button variant="outline" size="sm" asChild>
                         <a href={resolveBackendAssetUrl(request.offer_letter_url)} target="_blank" rel="noreferrer">
                           <ExternalLink className="mr-2 h-4 w-4" />
                           Open Offer Letter
+                        </a>
+                      </Button>
+                    )}
+                    {request.termination_letter_url && (
+                      <Button variant="outline" size="sm" asChild>
+                        <a href={resolveBackendAssetUrl(request.termination_letter_url)} target="_blank" rel="noreferrer">
+                          <ExternalLink className="mr-2 h-4 w-4" />
+                          Open Termination / Relieving Letter
                         </a>
                       </Button>
                     )}

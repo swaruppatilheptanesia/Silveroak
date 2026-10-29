@@ -1,5 +1,6 @@
 import path from 'path';
 import swaggerJsdoc from 'swagger-jsdoc';
+import { env } from './env';
 
 const docsDir = path.resolve(__dirname, '..');
 const isCompiledBuild = path.basename(docsDir) === 'dist';
@@ -19,7 +20,7 @@ const options: swaggerJsdoc.Options = {
       description: 'Training & Placement Portal Backend API for Silver Oak University',
     },
     servers: [
-      { url: 'http://localhost:3000', description: 'Development' },
+      { url: env.apiPublicUrl, description: env.isProduction ? 'Server' : 'Development' },
     ],
     components: {
       securitySchemes: {

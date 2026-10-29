@@ -242,10 +242,23 @@ export default function Dashboard() {
   const pendingOffers = myOffers.filter((offer) => offer.status === 'pending_student_action');
   const pendingOffer = pendingOffers[0] ?? null;
   const remainingPending = Math.max(0, pendingOffers.length - 1);
-  const hasAnyOffer = myOffers.length > 0;
-  const offerBlockReason = hasAnyOffer
-    ? 'You already have an offer on record; applications are locked.'
-    : null;
+  // Per-Posting-Type offer lock: a non-rejected, non-overridden offer locks its posting type only
+  // (other types stay open). Mirrors the backend offer-block; keyed the same way the cards render.
+  const blockingOfferTypeValues = new Set(
+    myOffers
+      .filter(
+        (offer) =>
+          offer.status !== 'rejected_by_student' &&
+          offer.status !== 'rejected_by_admin' &&
+          !offer.admin_override_enabled,
+      )
+      .map((offer) => getPostingTypeInterestComparisonKey(offer.posting.type)),
+  );
+  function offerBlockReasonFor(postingTypeValue: string): string | null {
+    return blockingOfferTypeValues.has(getPostingTypeInterestComparisonKey(postingTypeValue))
+      ? 'You already have an active offer for this posting type; applications for it are locked.'
+      : null;
+  }
 
   async function handleAcceptPendingOffer(offerId: string) {
     try {
@@ -257,8 +270,9 @@ export default function Dashboard() {
   }
 
   async function handleRegisterInterest(postingTypeValue: string, displayLabel: string) {
-    if (offerBlockReason) {
-      toast.error(offerBlockReason);
+    const blockReason = offerBlockReasonFor(postingTypeValue);
+    if (blockReason) {
+      toast.error(blockReason);
       return;
     }
     try {
@@ -280,8 +294,9 @@ export default function Dashboard() {
 
   // Open the posting-type policy gate; on accept it proceeds to register interest.
   function openInterestGate(postingTypeValue: string, displayLabel: string) {
-    if (offerBlockReason) {
-      toast.error(offerBlockReason);
+    const blockReason = offerBlockReasonFor(postingTypeValue);
+    if (blockReason) {
+      toast.error(blockReason);
       return;
     }
     setInterestGate({ value: postingTypeValue, label: displayLabel, masterId: resolvePostingTypeMasterId(postingTypeValue) });
@@ -432,7 +447,7 @@ export default function Dashboard() {
                     )}
                     <span className="flex items-center gap-1.5">
                       <MapPin className="h-4 w-4" />
-                      {student.department} • {student.batch}
+                      {student.branch ?? student.department} • {student.batch}
                     </span>
                   </div>
                 </div>
@@ -533,13 +548,14 @@ export default function Dashboard() {
                           withdrawnInterest.reviewed_at ? ` on ${formatDateTime(withdrawnInterest.reviewed_at)}` : ''
                         }${withdrawnInterest.reviewed_by_name ? ` by ${withdrawnInterest.reviewed_by_name}` : ''}.`
                       : undefined;
+                    const cardOfferBlockReason = offerBlockReasonFor(option.value);
                     const disabledReason = isWithdrawn
                       ? 'You have been withdrawn from this posting type by the TPO cell. Contact the TPO cell to be reinstated.'
                       : isPending
                         ? 'Your registration is awaiting TPO approval.'
                         : !isAccepting
                           ? 'Applications are currently closed for this posting type.'
-                          : offerBlockReason ?? undefined;
+                          : cardOfferBlockReason ?? undefined;
 
                     return (
                       <div
@@ -580,7 +596,7 @@ export default function Dashboard() {
                             isRegistered ||
                             !isAccepting ||
                             registerInterests.isPending ||
-                            Boolean(offerBlockReason)
+                            Boolean(cardOfferBlockReason)
                           }
                           title={disabledReason}
                           onClick={() => openInterestGate(option.value, option.label)}

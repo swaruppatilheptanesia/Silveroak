@@ -280,7 +280,7 @@ function StudentDetailsContent({
         <DetailItem label="Roll Number" value={student.roll_number} />
         <DetailItem label="Email" value={student.email} />
         <DetailItem label="Mobile" value={student.mobile} />
-        <DetailItem label="Department / Branch" value={student.department} />
+        <DetailItem label="Branch" value={student.branch ?? student.department} />
         <DetailItem label="Course" value={student.course_name} />
         <DetailItem label="Batch" value={student.batch_year} />
         <DetailItem label="CGPA" value={formatCGPA(student.academicProfile.cgpa)} />

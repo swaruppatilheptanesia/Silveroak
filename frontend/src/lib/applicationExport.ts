@@ -47,9 +47,9 @@ export const APPLICATION_EXPORT_FIELDS = [
   },
   {
     key: 'department',
-    label: 'Department',
+    label: 'Branch',
     section: 'Student',
-    getValue: (application) => application.student.department,
+    getValue: (application) => application.student.branch ?? application.student.department,
   },
   {
     key: 'batch',

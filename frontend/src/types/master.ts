@@ -9,6 +9,17 @@ export type MasterCategory =
   | 'posting_type'
   | 'event_type';
 
+/**
+ * posting_type only: one cascading targeting row (Institute → Course → Branch → Semester). Each row is a
+ * complete eligible combination; a student matching ANY row is eligible. All cells are required.
+ */
+export interface ScopeRow {
+  institute: string;
+  course: string;
+  branch: string;
+  semesters: string[];
+}
+
 export interface ApiMasterOption {
   id: string;
   category: MasterCategory;
@@ -18,6 +29,8 @@ export interface ApiMasterOption {
   target_branches: string[];
   target_semesters: string[];
   target_academic_years: string[];
+  // Present only on posting_type options: cascading Institute→Course→Branch→Semester rows (see ScopeRow).
+  scope_rows?: ScopeRow[];
   is_active: boolean;
   created_at: string;
   updated_at: string;
@@ -56,6 +69,7 @@ export interface CreateMasterInput {
   target_branches?: string[];
   target_semesters?: string[];
   target_academic_years?: string[];
+  scope_rows?: ScopeRow[];
   is_active?: boolean;
   accepting_applications?: boolean;
 }
@@ -67,6 +81,7 @@ export interface UpdateMasterInput {
   target_branches?: string[];
   target_semesters?: string[];
   target_academic_years?: string[];
+  scope_rows?: ScopeRow[];
   is_active?: boolean;
   accepting_applications?: boolean;
 }

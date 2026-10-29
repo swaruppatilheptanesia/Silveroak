@@ -125,7 +125,7 @@ export function EventAssignmentDialog({
       studentId: string;
       fullName: string;
       enrollmentNumber: string;
-      department: string;
+      branch: string;
       assignedPanelId: string | null;
       isAssigned: boolean;
     };
@@ -137,7 +137,7 @@ export function EventAssignmentDialog({
         studentId: assignment.student_id,
         fullName: assignment.student.full_name,
         enrollmentNumber: assignment.student.enrollment_number,
-        department: assignment.student.department,
+        branch: assignment.student.branch ?? assignment.student.department,
         assignedPanelId: assignment.panel_id,
         isAssigned: true,
       });
@@ -149,7 +149,7 @@ export function EventAssignmentDialog({
         studentId: application.student.id,
         fullName: application.student.full_name,
         enrollmentNumber: application.student.enrollment_number,
-        department: application.student.department,
+        branch: application.student.branch ?? application.student.department,
         assignedPanelId: null,
         isAssigned: false,
       });
@@ -162,7 +162,7 @@ export function EventAssignmentDialog({
           studentId: student.student_id,
           fullName: student.full_name,
           enrollmentNumber: student.enrollment_number,
-          department: student.department,
+          branch: student.branch ?? student.department,
           assignedPanelId: null,
           isAssigned: false,
         });
@@ -173,7 +173,7 @@ export function EventAssignmentDialog({
     // The directory rows are already filtered by the server; assigned/applicant rows are not.
     return Array.from(byStudentId.values()).filter((candidate) => {
       if (!query) return true;
-      return [candidate.fullName, candidate.enrollmentNumber, candidate.department].some((field) =>
+      return [candidate.fullName, candidate.enrollmentNumber, candidate.branch].some((field) =>
         field?.toLowerCase().includes(query),
       );
     });
@@ -261,7 +261,7 @@ export function EventAssignmentDialog({
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                   <Input
                     className="pl-9"
-                    placeholder="Search by student name, enrollment, or department..."
+                    placeholder="Search by student name, enrollment, or branch..."
                     value={searchTerm}
                     onChange={(event) => setSearchTerm(event.target.value)}
                   />
@@ -305,7 +305,7 @@ export function EventAssignmentDialog({
                         <TableHead className="w-12" />
                         <TableHead>Student</TableHead>
                         <TableHead>Enrollment</TableHead>
-                        <TableHead>Department</TableHead>
+                        <TableHead>Branch</TableHead>
                         <TableHead>Panel</TableHead>
                       </TableRow>
                     </TableHeader>
@@ -327,7 +327,7 @@ export function EventAssignmentDialog({
                             </span>
                           </TableCell>
                           <TableCell>{candidate.enrollmentNumber}</TableCell>
-                          <TableCell>{candidate.department}</TableCell>
+                          <TableCell>{candidate.branch}</TableCell>
                           <TableCell className="text-muted-foreground">
                             {candidate.assignedPanelId
                               ? panelNameById.get(candidate.assignedPanelId) ?? 'Unknown panel'

@@ -83,9 +83,13 @@ export function NOCRequestDetailSheet({ request, isOpen, onClose }: NOCRequestDe
             <Badge className={statusConfig.color}>{statusConfig.label}</Badge>
           </div>
           
-          <div className="flex items-center gap-2 mt-2">
+          <div className="flex items-center gap-2 mt-2 flex-wrap">
             <Badge variant="secondary">{NOC_TYPE_LABELS[request.noc_type]}</Badge>
             <Badge variant="outline">{getNocProgramLabel(request.program)}</Badge>
+            <Badge variant={request.is_active === false ? 'outline' : 'default'}>
+              {request.is_active === false ? 'Inactive' : 'Active'}
+            </Badge>
+            {request.is_reissue ? <Badge variant="secondary">Re-Issued</Badge> : null}
           </div>
         </SheetHeader>
         
@@ -300,7 +304,9 @@ export function NOCRequestDetailSheet({ request, isOpen, onClose }: NOCRequestDe
                 {request.internship_type && (
                   <div className="flex items-start gap-2">
                     <span className="text-muted-foreground w-24 shrink-0">Type:</span>
-                    <span className="font-medium capitalize">{request.internship_type}</span>
+                    <span className="font-medium capitalize">
+                      {request.internship_type === 'internship_placement' ? 'Internship + Placement' : request.internship_type}
+                    </span>
                   </div>
                 )}
                 <div className="flex items-start gap-2">
@@ -339,7 +345,29 @@ export function NOCRequestDetailSheet({ request, isOpen, onClose }: NOCRequestDe
                 <p className="text-sm text-muted-foreground mt-1">{driveName}</p>
               )}
             </div>
-            
+
+            {/* Re-Issue Details */}
+            {request.is_reissue && (
+              <>
+                <Separator />
+                <div>
+                  <h4 className="text-sm font-medium mb-3">Re-Issue Details</h4>
+                  <div className="space-y-2 text-sm">
+                    <div>
+                      <span className="text-muted-foreground">Previous NOC Request Number: </span>
+                      {request.previous_noc?.noc_number || request.noc_number || '—'}
+                    </div>
+                    {request.reason_for_company_change && (
+                      <div>
+                        <span className="text-muted-foreground">Reason for Company Change: </span>
+                        {request.reason_for_company_change}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </>
+            )}
+
             {/* Approval Remarks */}
             {(request.faculty_remarks || request.tpo_remarks) && (
               <>
@@ -369,12 +397,28 @@ export function NOCRequestDetailSheet({ request, isOpen, onClose }: NOCRequestDe
             )}
             
             {/* Documents */}
-            {(request.offer_letter_url || request.supporting_document_url || (request as Partial<ApiNocMyItem>).completion_certificate_url) && (
+            {(request.offer_letter_url || request.supporting_document_url || request.termination_letter_url || (request as Partial<ApiNocMyItem>).completion_certificate_url) && (
               <>
                 <Separator />
                 <div>
                   <h4 className="text-sm font-medium mb-3">Attached Documents</h4>
                   <div className="space-y-2">
+                    {request.termination_letter_url && (
+                      <div className="flex items-center gap-3 p-3 border rounded-lg">
+                        <FileText className="h-5 w-5 text-primary" />
+                        <div className="flex-1">
+                          <p className="text-sm font-medium">Termination / Relieving Letter</p>
+                          <p className="text-xs text-muted-foreground break-all">
+                            {request.termination_letter_name || request.termination_letter_url}
+                          </p>
+                        </div>
+                        <Button variant="outline" size="sm" asChild>
+                          <a href={resolveBackendAssetUrl(request.termination_letter_url)} target="_blank" rel="noreferrer">
+                            <ExternalLink className="h-4 w-4" />
+                          </a>
+                        </Button>
+                      </div>
+                    )}
                     {request.offer_letter_url && (
                       <div className="flex items-center gap-3 p-3 border rounded-lg">
                         <FileText className="h-5 w-5 text-primary" />

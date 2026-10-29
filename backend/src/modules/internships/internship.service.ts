@@ -2,6 +2,7 @@ import { InternshipStatus, InternshipType, IssueStatus, Prisma } from '@prisma/c
 import { prisma } from '../../config/database';
 import { AuthorizationError, NotFoundError } from '../../shared/errors';
 import { buildPrismaQuery, paginate } from '../../shared/utils/pagination';
+import { buildStudentScopeConditions } from '../../shared/utils/student-scope-filter';
 import type {
   CreateInternshipInput,
   CreateIssueInput,
@@ -16,21 +17,29 @@ function isAdmin(user: Express.AuthUser) {
 function buildStudentRelationFilter(
   user: Express.AuthUser,
   scope?: Express.ScopeFilters,
-  filters?: Pick<QueryInternshipsInput, 'department' | 'batch'>
+  filters?: Pick<QueryInternshipsInput, 'institute' | 'course' | 'branch' | 'semester' | 'academic_year' | 'batch'>
 ) {
-  const studentWhere: Record<string, unknown> = {};
+  const conditions: Prisma.StudentWhereInput[] = [];
 
   if (user.role === 'faculty_coordinator') {
-    studentWhere.department = scope?.department ?? '__no_match__';
-  } else if (filters?.department) {
-    studentWhere.department = filters.department;
+    // Faculty scope path (pre-existing exact-department scope; a tolerant match is a Tier-2 follow-up).
+    conditions.push({ department: scope?.department ?? '__no_match__' });
+  } else if (filters) {
+    // Admin ERP scope: real Student.branch + institute/course/semester/academic_year.
+    conditions.push(...buildStudentScopeConditions({
+      institute: filters.institute,
+      course: filters.course,
+      branch: filters.branch,
+      semester: filters.semester,
+      academic_year: filters.academic_year,
+    }));
   }
 
   if (filters?.batch) {
-    studentWhere.batch = filters.batch;
+    conditions.push({ batch: filters.batch });
   }
 
-  return Object.keys(studentWhere).length > 0 ? { is: studentWhere } : undefined;
+  return conditions.length > 0 ? { is: { AND: conditions } } : undefined;
 }
 
 function buildInternshipWhere(
@@ -162,6 +171,7 @@ export async function getInternships(
             full_name: true,
             enrollment_number: true,
             department: true,
+            branch: true,
             batch: true,
           },
         },
@@ -231,6 +241,7 @@ export async function getInternshipById(
           full_name: true,
           enrollment_number: true,
           department: true,
+          branch: true,
           batch: true,
           email: true,
           mobile: true,

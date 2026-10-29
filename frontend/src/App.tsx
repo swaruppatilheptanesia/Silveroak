@@ -113,14 +113,14 @@ const App = () => (
                       <Route path="/resumes" element={<ProtectedRoute allowedRoles={['student']}><Resumes /></ProtectedRoute>} />
                       <Route path="/opportunities" element={<ProtectedRoute allowedRoles={['student']}><Opportunities /></ProtectedRoute>} />
                       <Route path="/opportunities/:opportunityId" element={<ProtectedRoute allowedRoles={['student']}><OpportunityDetail /></ProtectedRoute>} />
-                      <Route path="/applications" element={<ProtectedRoute allowedRoles={['student']}><MyApplications /></ProtectedRoute>} />
-                      <Route path="/noc" element={<ProtectedRoute allowedRoles={['student']}><NOCDashboard /></ProtectedRoute>} />
-                      <Route path="/noc/certificate/:nocId" element={<ProtectedRoute allowedRoles={['student']}><NocCertificate /></ProtectedRoute>} />
-                      <Route path="/drives" element={<ProtectedRoute allowedRoles={['student']}><StudentDrives /></ProtectedRoute>} />
+                      <Route path="/applications" element={<ProtectedRoute allowedRoles={['student']} requiredPermission={{ module: 'applications', action: 'view' }}><MyApplications /></ProtectedRoute>} />
+                      <Route path="/noc" element={<ProtectedRoute allowedRoles={['student']} requiredPermission={{ module: 'noc_requests', action: 'view' }}><NOCDashboard /></ProtectedRoute>} />
+                      <Route path="/noc/certificate/:nocId" element={<ProtectedRoute allowedRoles={['student']} requiredPermission={{ module: 'noc_requests', action: 'view' }}><NocCertificate /></ProtectedRoute>} />
+                      <Route path="/drives" element={<ProtectedRoute allowedRoles={['student']} requiredPermission={{ module: 'events', action: 'view' }}><StudentDrives /></ProtectedRoute>} />
                       <Route path="/portfolio" element={<ProtectedRoute allowedRoles={['student']}><Portfolio /></ProtectedRoute>} />
                       <Route path="/policy" element={<ProtectedRoute allowedRoles={['student']}><PolicyAcceptance /></ProtectedRoute>} />
                       <Route path="/announcements" element={<ProtectedRoute allowedRoles={['student']}><StudentAnnouncements /></ProtectedRoute>} />
-                      <Route path="/no-dues" element={<ProtectedRoute allowedRoles={['student']}><NoDuesCertificate /></ProtectedRoute>} />
+                      <Route path="/no-dues" element={<ProtectedRoute allowedRoles={['student']} requiredPermission={{ module: 'no_dues', action: 'view' }}><NoDuesCertificate /></ProtectedRoute>} />
                       <Route path="/circulars" element={<ProtectedRoute allowedRoles={['student']}><StudentCirculars /></ProtectedRoute>} />
 
                       {/* Admin Routes */}

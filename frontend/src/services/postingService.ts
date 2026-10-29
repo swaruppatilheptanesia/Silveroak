@@ -3,6 +3,7 @@
  * Real API calls + mock data re-exports for gradual migration.
  */
 import { apiClient, tokenManager } from './apiClient';
+import { normalizePagination, type RawPagination } from '@/lib/pagination';
 import { parseApiErrorEnvelope, type ApiErrorDetail } from '@/lib/apiError';
 import type {
   ApiPostingListItem,
@@ -97,8 +98,9 @@ function toQueryString(params: any): string {
 
 const postingApi = {
   getPostings: async (params: PostingQueryParams = {}): Promise<PaginatedPostings> => {
-    const res = await apiClient.get<PaginatedPostings>(`/postings${toQueryString(params)}`);
-    return throwIfError(res);
+    const res = await apiClient.get<{ data: PaginatedPostings['data']; pagination: RawPagination }>(`/postings${toQueryString(params as Record<string, unknown>)}`);
+    const payload = throwIfError(res);
+    return { data: payload.data, pagination: normalizePagination(payload.pagination) };
   },
 
   getPostingById: async (postingId: string): Promise<ApiPostingDetail> => {

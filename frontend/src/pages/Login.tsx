@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { focusFirstFormError } from '@/lib/formErrors';
@@ -67,7 +67,13 @@ function getErrorMessage(err: unknown): string {
       case 'STUDENT_MOBILE_MISSING':
         return 'Your CRM record does not have a mobile number. Please contact the placement office.';
       case 'INVALID_OTP':
-        return 'The OTP is incorrect. For now, please use 000000.';
+        return 'The OTP is incorrect. Please check the code emailed to you and try again.';
+      case 'OTP_ATTEMPTS_EXCEEDED':
+        return 'Too many incorrect attempts. Please request a new OTP.';
+      case 'OTP_EMAIL_FAILED':
+        return 'We could not send the OTP email right now. Please try again in a moment.';
+      case 'OTP_EMAIL_NOT_CONFIGURED':
+        return 'OTP delivery is not configured yet. Please contact the placement office.';
       case 'SIGNUP_SESSION_EXPIRED':
       case 'SIGNUP_VERIFICATION_EXPIRED':
         return 'This signup session expired. Please start again.';
@@ -103,8 +109,16 @@ export default function Login() {
   const [signupToken, setSignupToken] = useState<string | null>(null);
   const [verifiedToken, setVerifiedToken] = useState<string | null>(null);
   const [signupName, setSignupName] = useState<string | null>(null);
-  const [maskedMobile, setMaskedMobile] = useState<string | null>(null);
+  const [maskedEmail, setMaskedEmail] = useState<string | null>(null);
   const [isSignupSubmitting, setIsSignupSubmitting] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(0);
+
+  // Tick down the "Resend OTP" cooldown once per second while it's active.
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const timer = setTimeout(() => setResendCooldown((value) => Math.max(0, value - 1)), 1000);
+    return () => clearTimeout(timer);
+  }, [resendCooldown]);
   const [forgotPasswordOpen, setForgotPasswordOpen] = useState(false);
   const [forgotStep, setForgotStep] = useState<'email' | 'reset'>('email');
   const [forgotEmail, setForgotEmail] = useState('');
@@ -189,9 +203,33 @@ export default function Login() {
       });
       setSignupToken(result.signup_token);
       setSignupName(result.full_name);
-      setMaskedMobile(result.masked_mobile);
+      setMaskedEmail(result.masked_email);
       setSignupOtp('');
+      setResendCooldown(30);
       setSignupStep('otp');
+    } catch (err) {
+      setSignupError(getErrorMessage(err));
+    } finally {
+      setIsSignupSubmitting(false);
+    }
+  };
+
+  // Re-request an OTP for the same enrollment number (issues a fresh signup session + token).
+  const handleResendOtp = async () => {
+    const enrollmentNo = signupEnrollment.trim();
+    if (!enrollmentNo || resendCooldown > 0 || isSignupSubmitting) return;
+    setSignupError(null);
+    setIsSignupSubmitting(true);
+    try {
+      const result = await authService.requestStudentSignupOtp({
+        enrollment_no: enrollmentNo,
+        tenant_slug: tenant.slug,
+      });
+      setSignupToken(result.signup_token);
+      setSignupName(result.full_name);
+      setMaskedEmail(result.masked_email);
+      setSignupOtp('');
+      setResendCooldown(30);
     } catch (err) {
       setSignupError(getErrorMessage(err));
     } finally {
@@ -478,7 +516,8 @@ export default function Login() {
                   <div className="rounded-md border bg-muted/30 p-3 text-sm">
                     <p className="font-medium">{signupName}</p>
                     <p className="text-muted-foreground">
-                      OTP sent to mobile {maskedMobile || 'on record'}. Use 000000 for now.
+                      We've emailed a 6-digit OTP to your official email{' '}
+                      <span className="font-medium">{maskedEmail || 'on record'}</span>. Enter it below to verify.
                     </p>
                   </div>
                   <div className="space-y-2">
@@ -489,7 +528,7 @@ export default function Login() {
                       id="signup-otp"
                       value={signupOtp}
                       onChange={(event) => setSignupOtp(event.target.value.replace(/\D/g, '').slice(0, 6))}
-                      placeholder="000000"
+                      placeholder="Enter 6-digit code"
                       inputMode="numeric"
                       autoComplete="one-time-code"
                       disabled={isSignupSubmitting}
@@ -505,6 +544,17 @@ export default function Login() {
                       'Verify OTP'
                     )}
                   </Button>
+                  <div className="text-center text-sm text-muted-foreground">
+                    Didn't get the email?{' '}
+                    <button
+                      type="button"
+                      onClick={handleResendOtp}
+                      disabled={resendCooldown > 0 || isSignupSubmitting}
+                      className="font-medium text-primary hover:underline disabled:cursor-not-allowed disabled:text-muted-foreground disabled:no-underline"
+                    >
+                      {resendCooldown > 0 ? `Resend OTP in ${resendCooldown}s` : 'Resend OTP'}
+                    </button>
+                  </div>
                 </form>
               )}
 

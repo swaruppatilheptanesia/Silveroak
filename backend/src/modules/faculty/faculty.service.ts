@@ -232,6 +232,7 @@ function mapFacultyStudent(student: FacultyStudentSource) {
     mobile: student.mobile,
     batch: student.batch,
     department: student.department,
+    branch: student.branch,
     cgpa: decimalToNumber(student.academic_profile?.cgpa),
     backlogs: student.academic_profile?.backlog_count ?? 0,
     active_backlogs: student.academic_profile?.active_backlogs ?? 0,
@@ -406,6 +407,7 @@ export async function getStudentFilterOptions(
       select: {
         institute: true,
         department: true,
+        branch: true,
         course: true,
         academic_profile: { select: { semester: true } },
       },
@@ -555,6 +557,7 @@ function mapProgramStudent(
     institute_name: student.institute,
     course_name: student.course,
     department: student.department,
+    branch: student.branch,
     semester: student.academic_profile?.semester ?? null,
     batch: student.batch,
     cgpa: decimalToNumber(student.academic_profile?.cgpa),

@@ -16,21 +16,23 @@ import {
 
 const router = Router();
 
-// Student-scoped feed: skip the generic events:view permission matrix and rely
-// on per-student scoping via EventStudent. Matches the existing applyVisibilityScope
-// branch for role='student' in event.service.ts.
+// Student-scoped feed: per-student scoping via EventStudent, PLUS the events:view
+// permission gate so a Super Admin revoking a student's View from the Roles tab is
+// enforced here (the student window disappears).
 router.get(
   '/my',
   requireRole('student'),
+  requirePermission('events', 'view'),
   scopeToOwn(),
   ctrl.getMyEvents,
 );
 
 // Student-scoped event detail — service-level applyVisibilityScope keeps the
-// student bound to events they're assigned to, so no requirePermission needed.
+// student bound to events they're assigned to; events:view gates the window.
 router.get(
   '/my/:eventId',
   requireRole('student'),
+  requirePermission('events', 'view'),
   scopeToOwn(),
   ctrl.getMyEventById,
 );

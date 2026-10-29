@@ -3,6 +3,7 @@
  * Real API calls + mock data re-exports for gradual migration.
  */
 import { apiClient } from './apiClient';
+import { normalizePagination, type RawPagination } from '@/lib/pagination';
 import { parseApiErrorEnvelope, type ApiErrorDetail } from '@/lib/apiError';
 import type {
   ApiApplicationCreated,
@@ -111,8 +112,9 @@ const applicationApi = {
   // ── Admin endpoints ──
   getApplications: async (params: ApplicationQueryParams = {}): Promise<PaginatedApplications> => {
     const normalized = normalizeApplicationQuery(params);
-    const res = await apiClient.get<PaginatedApplications>(`/applications${toQueryString(normalized)}`);
-    return throwIfError(res);
+    const res = await apiClient.get<{ data: PaginatedApplications['data']; pagination: RawPagination }>(`/applications${toQueryString(normalized)}`);
+    const payload = throwIfError(res);
+    return { data: payload.data, pagination: normalizePagination(payload.pagination) };
   },
 
   getAllApplications: async (params: ApplicationQueryParams = {}): Promise<ApiApplicationListItem[]> => {

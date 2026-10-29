@@ -19,6 +19,7 @@ export interface Application {
   enrollment_number: string;
   email: string;
   department: string;
+  branch?: string | null;
   batch: string;
   cgpa: number;
   tenth_percentage: number;
@@ -191,6 +192,7 @@ export interface ApiApplicationListItem {
     email: string;
     mobile: string | null;
     department: string;
+    branch?: string | null;
     batch: string;
     course: string | null;
     institute: string | null;
@@ -232,6 +234,7 @@ export interface ApiApplicationDetail {
     full_name: string;
     enrollment_number: string;
     department: string;
+    branch?: string | null;
     batch: string;
   };
   posting: {

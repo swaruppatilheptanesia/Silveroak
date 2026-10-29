@@ -81,13 +81,13 @@ export async function getCompanyWiseStats(tenantId: string) {
 }
 
 export async function getDepartmentWiseStats(tenantId: string) {
-  const departments = await prisma.student.groupBy({
-    by: ['department'],
+  const branches = await prisma.student.groupBy({
+    by: ['branch'],
     where: { tenant_id: tenantId },
     _count: true,
   });
 
-  return { departments: departments.map(d => ({ department: d.department, count: d._count })) };
+  return { branches: branches.map(b => ({ branch: b.branch ?? '—', count: b._count })) };
 }
 
 export async function getProfileCompletionStats(tenantId: string) {

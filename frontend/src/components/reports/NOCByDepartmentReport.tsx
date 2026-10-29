@@ -55,8 +55,8 @@ export default function NOCByDepartmentReport() {
   const { data, isLoading } = useNocByDepartmentReport(queryParams);
 
   const deptSummaries: DeptSummary[] = useMemo(() => {
-    return (data?.departments ?? []).map((department: any) => ({
-      department: department.department,
+    return (data?.branches ?? []).map((department: any) => ({
+      department: department.branch,
       total: department.total,
       pending: department.pending,
       approved: department.approved,
@@ -74,7 +74,7 @@ export default function NOCByDepartmentReport() {
     })).sort((a, b) => b.total - a.total);
   }, [data]);
 
-  const overallStats = data?.stats ?? { total: 0, departments: 0, pending: 0, issued: 0 };
+  const overallStats = data?.stats ?? { total: 0, branches: 0, pending: 0, issued: 0 };
 
   const handleExport = () => {
     const rows: string[] = [];
@@ -84,20 +84,20 @@ export default function NOCByDepartmentReport() {
         rows.push(`${department.department},${batch.batch},${batch.total},${batch.pending},${batch.approved + batch.issued},${batch.rejected},—`);
       });
     });
-    const csv = `Department,Batch,Total,Pending,Approved/Issued,Rejected,Approval Rate\n${rows.join('\n')}`;
-    downloadCSV(csv, 'noc_by_department_batch');
+    const csv = `Branch,Batch,Total,Pending,Approved/Issued,Rejected,Approval Rate\n${rows.join('\n')}`;
+    downloadCSV(csv, 'noc_by_branch_batch');
   };
 
   const cards = [
     { label: 'Total Requests', value: overallStats.total, icon: Users, color: 'text-primary' },
-    { label: 'Departments', value: overallStats.departments, icon: Building, color: 'text-blue-600' },
+    { label: 'Branches', value: overallStats.branches, icon: Building, color: 'text-blue-600' },
     { label: 'Pending', value: overallStats.pending, icon: Clock, color: 'text-yellow-600' },
     { label: 'Issued', value: overallStats.issued, icon: CheckCircle, color: 'text-green-600' },
   ];
 
   return (
     <div className="space-y-4 lg:space-y-6">
-      <ReportToolbar title="NOC by Department / Batch" totalRecords={overallStats.total} dateRange={dateRange} onDateRangeChange={setDateRange} onExportCSV={handleExport} />
+      <ReportToolbar title="NOC by Branch / Batch" totalRecords={overallStats.total} dateRange={dateRange} onDateRangeChange={setDateRange} onExportCSV={handleExport} />
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {cards.map((card) => (
@@ -145,7 +145,7 @@ export default function NOCByDepartmentReport() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="min-w-[200px]">Department</TableHead>
+                  <TableHead className="min-w-[200px]">Branch</TableHead>
                   <TableHead className="text-center">Total</TableHead>
                   <TableHead className="text-center">Pending</TableHead>
                   <TableHead className="text-center">Approved / Issued</TableHead>
@@ -233,7 +233,7 @@ export default function NOCByDepartmentReport() {
           </div>
 
           <p className="text-xs text-muted-foreground">
-            Showing {deptSummaries.length} departments • Click a row to expand batch details
+            Showing {deptSummaries.length} branches • Click a row to expand batch details
           </p>
         </CardContent>
       </Card>

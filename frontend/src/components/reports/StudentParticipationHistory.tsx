@@ -95,10 +95,7 @@ export default function StudentParticipationHistory() {
   const allCourses = useMemo(() => {
     return Array.from(new Set(studentSummaries.map((student) => student.course).filter((value) => value && value !== '—'))).sort();
   }, [studentSummaries]);
-  const allBranches = useMemo(() => {
-    return Array.from(new Set(studentSummaries.map((student) => student.branch).filter(Boolean))).sort();
-  }, [studentSummaries]);
-
+  const branches = useMemo(() => Array.from(new Set(studentSummaries.map((r: any) => r.branch).filter(Boolean))).sort(), [studentSummaries]);
   const overallStats = useMemo(() => {
     return {
       totalStudents: studentSummaries.length,
@@ -173,10 +170,12 @@ export default function StudentParticipationHistory() {
               </SelectContent>
             </Select>
             <Select value={branchFilter} onValueChange={setBranchFilter}>
-              <SelectTrigger><SelectValue placeholder="Branch" /></SelectTrigger>
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Branch" />
+              </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Branches</SelectItem>
-                {allBranches.map((branch) => (
+                {branches.map((branch) => (
                   <SelectItem key={branch} value={branch}>{branch}</SelectItem>
                 ))}
               </SelectContent>

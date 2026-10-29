@@ -24,7 +24,7 @@ interface OpportunitySummary {
     id: string;
     name: string;
     rollNo: string;
-    department: string;
+    branch: string;
     stage: string;
     outcome: 'shortlisted' | 'rejected' | 'pending';
     remarks?: string;
@@ -75,7 +75,7 @@ export default function ShortlistRejectionReport() {
         id: student.id,
         name: student.name,
         rollNo: student.rollNo,
-        department: student.department,
+        branch: student.branch,
         stage: student.stage,
         outcome: student.outcome,
         remarks: student.remarks,
@@ -220,7 +220,7 @@ export default function ShortlistRejectionReport() {
                                       <TableRow>
                                         <TableHead>Student</TableHead>
                                         <TableHead>Roll No.</TableHead>
-                                        <TableHead>Department</TableHead>
+                                        <TableHead>Branch</TableHead>
                                         <TableHead>Current Stage</TableHead>
                                         <TableHead>Outcome</TableHead>
                                         <TableHead>Remarks</TableHead>
@@ -236,7 +236,7 @@ export default function ShortlistRejectionReport() {
                                           <TableRow key={student.id}>
                                             <TableCell className="font-medium text-sm">{student.name}</TableCell>
                                             <TableCell className="text-sm">{student.rollNo}</TableCell>
-                                            <TableCell className="text-sm">{student.department}</TableCell>
+                                            <TableCell className="text-sm">{student.branch}</TableCell>
                                             <TableCell>
                                               <Badge className={`text-xs ${APPLICATION_STAGE_CONFIG[student.stage as keyof typeof APPLICATION_STAGE_CONFIG]?.color ?? ''}`}>
                                                 {APPLICATION_STAGE_CONFIG[student.stage as keyof typeof APPLICATION_STAGE_CONFIG]?.label ?? student.stage}

@@ -18,7 +18,7 @@ import type {
   PostingTypePreferenceInput,
 } from './student.schema';
 import { Prisma } from '@prisma/client';
-import { assertNoExistingOffer } from '../../shared/utils/offer-block';
+import { getBlockingOfferProgramValues } from '../../shared/utils/offer-block';
 import { getSelfPlacedNocProgramValues } from '../../shared/utils/self-placed-noc-block';
 import { assertPostingTypePolicyAccepted } from '../../shared/utils/posting-type-policy';
 import { notifyTpoAudience } from '../notifications/notification.service';
@@ -453,9 +453,40 @@ export async function getResumes(userId: string) {
   const student = await prisma.student.findUnique({ where: { user_id: userId } });
   if (!student) throw new NotFoundError('Student profile');
 
-  return prisma.resume.findMany({
+  const resumes = await prisma.resume.findMany({
     where: { student_id: student.id },
     orderBy: { uploaded_at: 'desc' },
+    include: { _count: { select: { applications: true } } },
+  });
+  // application_count: a resume used in an application can be updated but not deleted.
+  return resumes.map(({ _count, ...r }) => ({ ...r, application_count: _count.applications }));
+}
+
+/**
+ * Replace a resume's file in place (SR 8). The id never changes, so every Application.resume_id that points
+ * at it keeps a valid link — and PlaceReady AI interviews pick up the new file. The old file stays on disk
+ * (same as delete).
+ */
+export async function updateResume(
+  userId: string,
+  resumeId: string,
+  data: { name?: string; file_url: string; file_size?: number; mime_type?: string }
+) {
+  const student = await prisma.student.findUnique({ where: { user_id: userId } });
+  if (!student) throw new NotFoundError('Student profile');
+
+  const resume = await prisma.resume.findFirst({ where: { id: resumeId, student_id: student.id } });
+  if (!resume) throw new NotFoundError('Resume');
+
+  return prisma.resume.update({
+    where: { id: resumeId },
+    data: {
+      ...(data.name ? { name: data.name } : {}),
+      file_url: data.file_url,
+      file_size: data.file_size,
+      mime_type: data.mime_type,
+      uploaded_at: new Date(),
+    },
   });
 }
 
@@ -522,6 +553,15 @@ export async function deleteResume(userId: string, resumeId: string) {
     where: { id: resumeId, student_id: student.id },
   });
   if (!resume) throw new NotFoundError('Resume');
+
+  // A resume attached to an application can only be updated — deleting it would break that link.
+  const used = await prisma.application.count({ where: { resume_id: resumeId } });
+  if (used > 0) {
+    throw new BusinessRuleError(
+      `This resume is used in ${used} application${used === 1 ? '' : 's'} — update it instead of deleting`,
+      'RESUME_IN_USE'
+    );
+  }
 
   await prisma.resume.delete({ where: { id: resumeId } });
 
@@ -654,8 +694,6 @@ export async function registerInterests(userId: string, data: InterestRegistrati
   const student = await prisma.student.findUnique({ where: { user_id: userId } });
   if (!student) throw new NotFoundError('Student profile');
 
-  await assertNoExistingOffer(student.id);
-
   const cleanedInterestTypes = Array.from(
     new Set(data.interest_types.map((value) => cleanInterestRegistrationValue(value)))
   );
@@ -729,6 +767,20 @@ export async function registerInterests(userId: string, data: InterestRegistrati
       throw new BusinessRuleError(
         `You have a self-placed NOC for posting type(s): ${blockedNames.join(', ')}. Interest/applications for those are blocked.`,
         'SELF_PLACED_NOC_BLOCK',
+      );
+    }
+  }
+
+  // A non-rejected, non-overridden offer for a requested posting type locks interest in it.
+  const blockingOfferPrograms = await getBlockingOfferProgramValues(student.id);
+  if (blockingOfferPrograms.size > 0) {
+    const blockedNames = masterOptions
+      .filter((option) => blockingOfferPrograms.has(option.value.trim().toLowerCase()))
+      .map((option) => option.value);
+    if (blockedNames.length > 0) {
+      throw new BusinessRuleError(
+        `You already have an active offer for posting type(s): ${blockedNames.join(', ')}. Applications for those are locked.`,
+        'APPLICATIONS_LOCKED_BY_OFFER',
       );
     }
   }

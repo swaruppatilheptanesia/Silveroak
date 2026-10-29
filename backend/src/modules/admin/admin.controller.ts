@@ -176,3 +176,8 @@ export async function withdrawInterestRegistration(req: Request, res: Response, 
   try { res.json(await service.withdrawInterestRegistration(getParam(req, 'id'), req.user!.tenant_id, req.user!.id, req.user!.name, req.validated!.body as any)); }
   catch (err) { next(err); }
 }
+
+export async function deleteInterestRegistration(req: Request, res: Response, next: NextFunction) {
+  try { res.json(await service.deleteInterestRegistration(getParam(req, 'id'), req.user!.tenant_id)); }
+  catch (err) { next(err); }
+}

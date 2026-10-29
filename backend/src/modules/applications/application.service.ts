@@ -3,7 +3,7 @@ import { NotFoundError, BusinessRuleError } from '../../shared/errors';
 import { paginate, buildPrismaQuery } from '../../shared/utils/pagination';
 import { logger } from '../../config/logger';
 import { matchesStudentTargeting, type StudentTargetContext } from '../../shared/utils/student-targeting';
-import { assertNoExistingOffer } from '../../shared/utils/offer-block';
+import { assertNoBlockingOfferForType } from '../../shared/utils/offer-block';
 import { assertPlacementInterest } from '../../shared/utils/placement-interest';
 import { assertNoSelfPlacedNoc } from '../../shared/utils/self-placed-noc-block';
 import { assertPostingTypePolicyAccepted } from '../../shared/utils/posting-type-policy';
@@ -60,13 +60,13 @@ function matchesAllowedBatch(studentBatch: string, allowedBatches: string[]): bo
 function getStudentTargetContext(student: {
   institute: string | null;
   course: string | null;
-  department: string;
+  branch: string | null;
   academicProfile: { semester: number | null } | null;
 }): StudentTargetContext {
   return {
     institute: student.institute ?? null,
     course: student.course ?? null,
-    branch: student.department ?? null,
+    branch: student.branch ?? null,
     semester: student.academicProfile?.semester ?? null,
   };
 }
@@ -74,8 +74,6 @@ function getStudentTargetContext(student: {
 export async function apply(userId: string, tenantId: string, data: ApplyInput) {
   const student = await prisma.student.findUnique({ where: { user_id: userId } });
   if (!student) throw new NotFoundError('Student profile');
-
-  await assertNoExistingOffer(student.id);
 
   const posting = await prisma.posting.findFirst({
     where: { id: data.posting_id, tenant_id: tenantId },
@@ -86,7 +84,7 @@ export async function apply(userId: string, tenantId: string, data: ApplyInput) 
   const studentTargetContext = getStudentTargetContext({
     institute: student.institute,
     course: student.course,
-    department: student.department,
+    branch: student.branch,
     academicProfile: academic ? { semester: academic.semester } : null,
   });
 
@@ -119,6 +117,9 @@ export async function apply(userId: string, tenantId: string, data: ApplyInput) 
 
   // A non-rejected self-sourced NOC for this posting type blocks applying to the same type.
   await assertNoSelfPlacedNoc(student.id, posting.posting_type_master_id);
+
+  // A non-rejected, non-overridden offer for this posting type locks applications for it.
+  await assertNoBlockingOfferForType(student.id, posting.posting_type_master_id);
 
   // The policy linked to this posting type (if any) must be accepted first.
   await assertPostingTypePolicyAccepted(student.id, posting.posting_type_master_id);
@@ -242,6 +243,7 @@ export async function getApplicationsByPosting(tenantId: string, filters: QueryA
             email: true,
             mobile: true,
             department: true,
+            branch: true,
             batch: true,
             course: true,
             institute: true,
@@ -300,7 +302,7 @@ export async function getApplicationById(applicationId: string) {
   const application = await prisma.application.findUnique({
     where: { id: applicationId },
     include: {
-      student: { select: { id: true, full_name: true, enrollment_number: true, department: true, batch: true } },
+      student: { select: { id: true, full_name: true, enrollment_number: true, department: true, branch: true, batch: true } },
       posting: { select: { id: true, title: true, company: { select: { name: true } } } },
       stage_history: { orderBy: { changed_at: 'desc' } },
     },

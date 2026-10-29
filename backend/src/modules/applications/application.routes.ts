@@ -14,10 +14,12 @@ import {
 
 const router = Router();
 
-// Student routes
+// Student routes — gated by the applications permission matrix so a Super Admin can
+// revoke a student's View/Create/Delete from the Roles tab and have it enforced here.
 router.post(
   '/apply',
   requireRole('student'),
+  requirePermission('applications', 'create'),
   requireStudentProfileAccess,
   validate(applySchema),
   ctrl.apply
@@ -25,12 +27,14 @@ router.post(
 router.get(
   '/my',
   requireRole('student'),
+  requirePermission('applications', 'view'),
   requireStudentProfileAccess,
   ctrl.getMyApplications
 );
 router.delete(
   '/:applicationId/withdraw',
   requireRole('student'),
+  requirePermission('applications', 'delete'),
   requireStudentProfileAccess,
   ctrl.withdrawApplication
 );

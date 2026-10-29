@@ -116,6 +116,7 @@ const ROLE_MODULE_DEFAULTS: Record<UserRole, Partial<Record<PermissionModule, Pe
   },
   faculty_coordinator: {
     students: flags({ can_view: true, can_export: true }),
+    portfolios: flags({ can_view: true }),
     companies: flags({ can_view: true }),
     offers: flags({ can_view: true }),
     events: flags({ can_view: true, can_approve: true }),

@@ -1,10 +1,11 @@
-import { useDeferredValue, useMemo, useState } from 'react';
+import { useDeferredValue, useEffect, useState } from 'react';
 import { Building2, Calendar, ClipboardCheck, Clock, Eye, MapPin, Search, Users } from 'lucide-react';
 import { format } from 'date-fns';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { EventAttendanceDialog } from '@/components/drives/EventAttendanceDialog';
 import { EventDetailDialog } from '@/components/drives/EventDetailDialog';
 import { EmptyState } from '@/components/shared/EmptyState';
+import { ListPager } from '@/components/shared/ListPager';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -24,30 +25,37 @@ export default function FacultyDrives() {
   const [attendanceEventId, setAttendanceEventId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const deferredSearch = useDeferredValue(searchTerm);
-  const eventsQuery = useEvents({
-    page: 1,
-    limit: 100,
+  const [upcomingPage, setUpcomingPage] = useState(1);
+  const [pastPage, setPastPage] = useState(1);
+  const search = deferredSearch.trim() || undefined;
+
+  useEffect(() => {
+    setUpcomingPage(1);
+    setPastPage(1);
+  }, [deferredSearch]);
+
+  const upcomingQuery = useEvents({
+    page: upcomingPage,
+    limit: 20,
+    statuses: ['published', 'ongoing'],
+    search,
+    sort_by: 'date',
+    sort_order: 'asc',
+  });
+  const pastQuery = useEvents({
+    page: pastPage,
+    limit: 20,
+    statuses: ['completed'],
+    search,
     sort_by: 'date',
     sort_order: 'asc',
   });
 
-  const events = eventsQuery.data?.data ?? [];
-  const filteredEvents = useMemo(() => {
-    const query = deferredSearch.trim().toLowerCase();
-    if (!query) return events;
-    return events.filter((event) =>
-      [event.title, event.company?.name, event.venue, getEventTypeLabel(event.type)]
-        .some((field) => (field ?? '').toLowerCase().includes(query))
-    );
-  }, [deferredSearch, events]);
-  const upcomingEvents = useMemo(
-    () => filteredEvents.filter((event) => event.status === 'published' || event.status === 'ongoing'),
-    [filteredEvents]
-  );
-  const pastEvents = useMemo(
-    () => filteredEvents.filter((event) => event.status === 'completed'),
-    [filteredEvents]
-  );
+  const upcomingEvents = upcomingQuery.data?.data ?? [];
+  const pastEvents = pastQuery.data?.data ?? [];
+  const upcomingTotal = upcomingQuery.data?.pagination.total ?? 0;
+  const pastTotal = pastQuery.data?.pagination.total ?? 0;
+  const eventsQuery = { error: upcomingQuery.error ?? pastQuery.error };
 
   return (
     <DashboardLayout
@@ -77,8 +85,8 @@ export default function FacultyDrives() {
 
         <Tabs defaultValue="upcoming" className="space-y-4">
           <TabsList>
-            <TabsTrigger value="upcoming">Upcoming ({upcomingEvents.length})</TabsTrigger>
-            <TabsTrigger value="past">Past ({pastEvents.length})</TabsTrigger>
+            <TabsTrigger value="upcoming">Upcoming ({upcomingTotal})</TabsTrigger>
+            <TabsTrigger value="past">Past ({pastTotal})</TabsTrigger>
           </TabsList>
 
           <TabsContent value="upcoming" className="space-y-4">
@@ -141,6 +149,11 @@ export default function FacultyDrives() {
                 </Card>
               ))
             )}
+            <ListPager
+              page={upcomingQuery.data?.pagination.page ?? 1}
+              totalPages={upcomingQuery.data?.pagination.totalPages ?? 1}
+              onPageChange={setUpcomingPage}
+            />
           </TabsContent>
 
           <TabsContent value="past" className="space-y-4">
@@ -178,6 +191,11 @@ export default function FacultyDrives() {
                 </Card>
               ))
             )}
+            <ListPager
+              page={pastQuery.data?.pagination.page ?? 1}
+              totalPages={pastQuery.data?.pagination.totalPages ?? 1}
+              onPageChange={setPastPage}
+            />
           </TabsContent>
         </Tabs>
       </div>

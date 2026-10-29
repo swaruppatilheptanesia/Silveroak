@@ -15,6 +15,13 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { SearchableSelect } from '@/components/shared/SearchableSelect';
 import { useMasterValues } from '@/hooks/use-master-api';
 import { usePlacementSummaryReport } from '@/hooks/use-report-analytics-api';
@@ -22,25 +29,26 @@ import { downloadCSV } from './ReportToolbar';
 
 type QueryParams = {
   academic_year?: string;
-  department?: string;
+  branch?: string;
   batch?: string;
 };
 
 export default function PlacementSummaryReport() {
   const [academicYear, setAcademicYear] = useState('');
-  const [departmentFilter, setDepartmentFilter] = useState('all');
+  const [branchFilter, setBranchFilter] = useState('all');
   const [batchFilter, setBatchFilter] = useState('');
   const academicYearQuery = useMasterValues('academic_year');
 
   const queryParams = useMemo<QueryParams>(() => ({
     academic_year: academicYear || undefined,
-    department: departmentFilter === 'all' ? undefined : departmentFilter,
+    branch: branchFilter === 'all' ? undefined : branchFilter,
     batch: batchFilter || undefined,
-  }), [academicYear, batchFilter, departmentFilter]);
+  }), [academicYear, batchFilter, branchFilter]);
 
   const { data, isLoading } = usePlacementSummaryReport(queryParams);
 
-  const departments = data?.departments ?? [];
+  const branches = data?.branches ?? [];
+  const branchOptions = useMemo(() => Array.from(new Set(branches.map((r: any) => r.branch).filter(Boolean))).sort() as string[], [branches]);
   const stats = data?.stats ?? {
     students: 0,
     placed: 0,
@@ -51,27 +59,19 @@ export default function PlacementSummaryReport() {
     overall_rate: 0,
   };
 
-  const departmentOptions = useMemo(
-    () => Array.from(new Set(departments.map((row: any) => row.department))).sort(),
-    [departments],
-  );
   const academicYearOptions = useMemo(
     () => [...(academicYearQuery.data ?? [])]
       .sort((left, right) => right.localeCompare(left))
       .map((year) => ({ value: year, label: year })),
     [academicYearQuery.data],
   );
-  const departmentSelectOptions = useMemo(
-    () => departmentOptions.map((department) => ({ value: department, label: department })),
-    [departmentOptions],
-  );
 
   const handleExport = () => {
-    const rows = departments.map((row: any) => (
-      `"${row.department}",${row.totalStudents},${row.totalOffers},${row.placed},${row.interned},${row.joined},${row.unplaced},${row.avgCTC ? `₹${row.avgCTC.toFixed(2)} LPA` : '-'},${row.placementRate}%`
+    const rows = branches.map((row: any) => (
+      `"${row.branch}",${row.totalStudents},${row.totalOffers},${row.placed},${row.interned},${row.joined},${row.unplaced},${row.avgCTC ? `₹${row.avgCTC.toFixed(2)} LPA` : '-'},${row.placementRate}%`
     ));
     downloadCSV(
-      `Department,Students,Offers,Placed Jobs,Interned,Joined,Unplaced,Avg CTC,Placement Rate\n${rows.join('\n')}`,
+      `Branch,Students,Offers,Placed Jobs,Interned,Joined,Unplaced,Avg CTC,Placement Rate\n${rows.join('\n')}`,
       'placement_summary',
     );
   };
@@ -93,7 +93,7 @@ export default function PlacementSummaryReport() {
           </div>
           <h3 className="text-xl font-semibold">Placement Summary</h3>
           <p className="text-sm text-muted-foreground">
-            Department-level placement data from the backend.
+            Branch-level placement data from the backend.
           </p>
         </div>
         <Button variant="outline" size="sm" onClick={handleExport} className="gap-2">
@@ -132,18 +132,17 @@ export default function PlacementSummaryReport() {
               buttonClassName="h-9 w-[240px] text-xs"
               contentClassName="w-[min(28rem,calc(100vw-2rem))]"
             />
-            <SearchableSelect
-              options={departmentSelectOptions}
-              value={departmentFilter === 'all' ? '' : departmentFilter}
-              onValueChange={(value) => setDepartmentFilter(value || 'all')}
-              placeholder="Department"
-              searchPlaceholder="Search department..."
-              emptyMessage="No departments found."
-              loadingMessage="Loading departments..."
-              clearable
-              buttonClassName="h-9 w-[220px] text-xs"
-              contentClassName="w-[min(28rem,calc(100vw-2rem))]"
-            />
+            <Select value={branchFilter} onValueChange={setBranchFilter}>
+              <SelectTrigger className="h-9 w-[200px] text-xs">
+                <SelectValue placeholder="Branch" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Branches</SelectItem>
+                {branchOptions.map((branch) => (
+                  <SelectItem key={branch} value={branch}>{branch}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <Input
               value={batchFilter}
               onChange={(event) => setBatchFilter(event.target.value)}
@@ -169,7 +168,7 @@ export default function PlacementSummaryReport() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Department</TableHead>
+                  <TableHead>Branch</TableHead>
                   <TableHead className="text-right">Students</TableHead>
                   <TableHead className="text-right">Offers</TableHead>
                   <TableHead className="text-right">Placed</TableHead>
@@ -181,22 +180,22 @@ export default function PlacementSummaryReport() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {isLoading && departments.length === 0 ? (
+                {isLoading && branches.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={9} className="py-8 text-center text-muted-foreground">
                       Loading placement summary...
                     </TableCell>
                   </TableRow>
-                ) : departments.length === 0 ? (
+                ) : branches.length === 0 ? (
                   <TableRow>
                     <TableCell colSpan={9} className="py-8 text-center text-muted-foreground">
                       No placement summary data available for the selected filters.
                     </TableCell>
                   </TableRow>
                 ) : (
-                  departments.map((row: any) => (
-                    <TableRow key={row.department}>
-                      <TableCell className="font-medium text-sm">{row.department}</TableCell>
+                  branches.map((row: any) => (
+                    <TableRow key={row.branch}>
+                      <TableCell className="font-medium text-sm">{row.branch}</TableCell>
                       <TableCell className="text-right">{row.totalStudents}</TableCell>
                       <TableCell className="text-right">{row.totalOffers}</TableCell>
                       <TableCell className="text-right">{row.placed}</TableCell>

@@ -18,7 +18,8 @@ export interface StudentSignupRequestOtpResponse {
   signup_token: string;
   enrollment_no: string;
   full_name: string;
-  masked_mobile: string | null;
+  masked_email: string | null;
+  masked_mobile?: string | null;
   message: string;
 }
 

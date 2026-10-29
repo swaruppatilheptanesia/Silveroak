@@ -174,6 +174,7 @@ export interface ApiStudentPersonal {
   date_of_birth: string | null;
   gender: string | null;
   department: string;
+  branch: string | null;
   batch: string;
   course: string | null;
   institute: string | null;
@@ -286,6 +287,8 @@ export interface ApiResume {
   mime_type: string;
   is_default: boolean;
   uploaded_at: string;
+  /** Applications that reference this resume — a used resume can be updated but not deleted. */
+  application_count?: number;
 }
 
 export type InterestRegistrationStatus = 'pending' | 'approved' | 'withdrawn';

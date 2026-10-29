@@ -111,7 +111,6 @@ export const queryAuditLogsSchema = paginationSchema.merge(sortSchema).extend({
 const verificationStatusSchema = z.enum(['pending', 'verified', 'rejected']);
 
 export const queryStudentsSchema = paginationSchema.merge(sortSchema).extend({
-  department: z.string().max(100).optional(),
   batch: z.string().max(20).optional(),
   verification_status: verificationStatusSchema.optional(),
   search: z.string().max(200).optional(),
@@ -193,7 +192,6 @@ export const updateEligibilityRuleSchema = createEligibilityRuleSchema.partial()
 export const querySelectionDatabaseSchema = dateRangeSchema.merge(searchSchema).extend({
   type: z.enum(['placement', 'internship']).optional(),
   posting_type: z.enum(['job', 'internship', 'stipend_internship']).optional(),
-  department: z.string().max(100).optional(),
   batch: z.string().max(20).optional(),
   company: z.string().max(300).optional(),
   outcome: z.enum(['joined', 'not_joined', 'pending']).optional(),
@@ -205,7 +203,6 @@ export const querySelectionDatabaseSchema = dateRangeSchema.merge(searchSchema).
 });
 
 export const queryPortfoliosSchema = searchSchema.extend({
-  department: z.string().max(100).optional(),
   status: z.enum(['draft', 'published']).optional(),
   institute: z.string().max(200).optional(),
   course: z.string().max(200).optional(),
@@ -216,7 +213,6 @@ export const queryPortfoliosSchema = searchSchema.extend({
 export const queryInterestRegistrationsSchema = searchSchema.extend({
   interest_type: z.string().max(150).optional(),
   posting_type: z.string().max(100).optional(),
-  department: z.string().max(100).optional(),
   status: z.enum(['pending', 'approved', 'withdrawn']).optional(),
   // FILTER COUNTER EXPORT — student-scope + registration date range
   institute: z.string().max(200).optional(),

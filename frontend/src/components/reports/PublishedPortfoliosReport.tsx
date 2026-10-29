@@ -24,21 +24,21 @@ import { usePublishedPortfoliosReport } from '@/hooks/use-report-analytics-api';
 import { downloadCSV } from './ReportToolbar';
 
 type QueryParams = {
-  department?: string;
+  branch?: string;
   batch?: string;
   search?: string;
 };
 
 export default function PublishedPortfoliosReport() {
   const [searchQuery, setSearchQuery] = useState('');
-  const [departmentFilter, setDepartmentFilter] = useState('all');
+  const [branchFilter, setBranchFilter] = useState('all');
   const [batchFilter, setBatchFilter] = useState('all');
 
   const queryParams = useMemo<QueryParams>(() => ({
-    department: departmentFilter === 'all' ? undefined : departmentFilter,
+    branch: branchFilter === 'all' ? undefined : branchFilter,
     batch: batchFilter === 'all' ? undefined : batchFilter,
     search: searchQuery || undefined,
-  }), [batchFilter, departmentFilter, searchQuery]);
+  }), [batchFilter, branchFilter, searchQuery]);
 
   const { data, isLoading } = usePublishedPortfoliosReport(queryParams);
 
@@ -47,7 +47,7 @@ export default function PublishedPortfoliosReport() {
       id: portfolio.student_id,
       studentName: portfolio.full_name,
       enrollmentNumber: portfolio.enrollment_number,
-      department: portfolio.department,
+      branch: portfolio.branch,
       batch: portfolio.batch,
       projectCount: portfolio.project_count,
       internshipCount: portfolio.internship_count,
@@ -55,18 +55,15 @@ export default function PublishedPortfoliosReport() {
     }));
   }, [data]);
 
-  const departments = useMemo(
-    () => Array.from(new Set(portfolios.map((portfolio) => portfolio.department))).sort(),
-    [portfolios],
-  );
-
   const batches = useMemo(
     () => Array.from(new Set(portfolios.map((portfolio) => portfolio.batch))).sort(),
     [portfolios],
   );
 
-  const stats = data?.stats ?? { total: 0, departments: 0 };
-  const departmentBreakdown = data?.department_breakdown ?? [];
+  const branches = useMemo(() => Array.from(new Set(portfolios.map((r: any) => r.branch).filter(Boolean))).sort() as string[], [portfolios]);
+
+  const stats = data?.stats ?? { total: 0, branches: 0 };
+  const branchBreakdown = data?.branch_breakdown ?? [];
 
   const averages = useMemo(() => {
     const projectTotal = portfolios.reduce((sum, portfolio) => sum + portfolio.projectCount, 0);
@@ -80,10 +77,10 @@ export default function PublishedPortfoliosReport() {
 
   const handleExport = () => {
     const rows = portfolios.map((portfolio) => (
-      `"${portfolio.studentName}",${portfolio.enrollmentNumber},${portfolio.department},${portfolio.batch},${portfolio.projectCount},${portfolio.internshipCount},${portfolio.lastUpdated ? format(new Date(portfolio.lastUpdated), 'dd MMM yyyy') : '—'}`
+      `"${portfolio.studentName}",${portfolio.enrollmentNumber},${portfolio.branch},${portfolio.batch},${portfolio.projectCount},${portfolio.internshipCount},${portfolio.lastUpdated ? format(new Date(portfolio.lastUpdated), 'dd MMM yyyy') : '—'}`
     ));
     downloadCSV(
-      `Student,Enrollment,Department,Batch,Projects,Internships,Last Updated\n${rows.join('\n')}`,
+      `Student,Enrollment,Branch,Batch,Projects,Internships,Last Updated\n${rows.join('\n')}`,
       'published_portfolios',
     );
   };
@@ -116,8 +113,8 @@ export default function PublishedPortfoliosReport() {
         </Card>
         <Card>
           <CardContent className="p-4">
-            <p className="text-xs text-muted-foreground">Departments Covered</p>
-            <p className="text-2xl font-bold text-primary">{stats.departments}</p>
+            <p className="text-xs text-muted-foreground">Branches Covered</p>
+            <p className="text-2xl font-bold text-primary">{stats.branches}</p>
           </CardContent>
         </Card>
         <Card>
@@ -142,19 +139,19 @@ export default function PublishedPortfoliosReport() {
               <Input
                 value={searchQuery}
                 onChange={(event) => setSearchQuery(event.target.value)}
-                placeholder="Search student, enrollment or department..."
+                placeholder="Search student, enrollment or branch..."
                 className="pl-9"
               />
             </div>
-            <Select value={departmentFilter} onValueChange={setDepartmentFilter}>
+            <Select value={branchFilter} onValueChange={setBranchFilter}>
               <SelectTrigger>
-                <SelectValue placeholder="Department" />
+                <SelectValue placeholder="Branch" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Departments</SelectItem>
-                {departments.map((department) => (
-                  <SelectItem key={department} value={department}>
-                    {department}
+                <SelectItem value="all">All Branches</SelectItem>
+                {branches.map((branch) => (
+                  <SelectItem key={branch} value={branch}>
+                    {branch}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -179,7 +176,7 @@ export default function PublishedPortfoliosReport() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Student</TableHead>
-                  <TableHead>Department</TableHead>
+                  <TableHead>Branch</TableHead>
                   <TableHead>Batch</TableHead>
                   <TableHead className="text-right">Projects</TableHead>
                   <TableHead className="text-right">Internships</TableHead>
@@ -209,7 +206,7 @@ export default function PublishedPortfoliosReport() {
                           <p className="text-xs text-muted-foreground">{portfolio.enrollmentNumber}</p>
                         </div>
                       </TableCell>
-                      <TableCell className="text-sm">{portfolio.department}</TableCell>
+                      <TableCell className="text-sm">{portfolio.branch}</TableCell>
                       <TableCell className="text-sm">{portfolio.batch}</TableCell>
                       <TableCell className="text-right font-medium">{portfolio.projectCount}</TableCell>
                       <TableCell className="text-right font-medium">{portfolio.internshipCount}</TableCell>
@@ -233,14 +230,14 @@ export default function PublishedPortfoliosReport() {
 
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">Department Coverage</CardTitle>
+          <CardTitle className="text-base">Branch Coverage</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {departmentBreakdown.map(([department, count]: [string, number]) => (
-              <div key={department} className="rounded-lg border p-4">
+            {branchBreakdown.map(([branch, count]: [string, number]) => (
+              <div key={branch} className="rounded-lg border p-4">
                 <div className="flex items-center justify-between">
-                  <p className="font-medium text-sm">{department}</p>
+                  <p className="font-medium text-sm">{branch}</p>
                   <span className="text-2xl font-bold">{count}</span>
                 </div>
                 <p className="text-xs text-muted-foreground mt-1">Published portfolios</p>

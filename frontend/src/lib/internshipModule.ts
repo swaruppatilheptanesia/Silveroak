@@ -81,6 +81,12 @@ export function getInternshipDepartment(internship: InternshipLike) {
   return internship.department;
 }
 
+/** Real ERP branch for the internship's student (falls back to the course-derived department). */
+export function getInternshipBranch(internship: InternshipLike) {
+  if (hasStudentObject(internship)) return internship.student.branch ?? internship.student.department ?? '—';
+  return internship.department ?? '—';
+}
+
 export function getInternshipBatch(internship: InternshipLike) {
   if (hasStudentObject(internship)) return internship.student.batch ?? '—';
   return internship.batch;

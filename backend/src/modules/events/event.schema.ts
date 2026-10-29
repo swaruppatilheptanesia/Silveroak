@@ -1,5 +1,29 @@
 import { z } from 'zod';
-import { paginationSchema, sortSchema } from '../../shared/schemas/common';
+import { paginationSchema, searchSchema, sortSchema } from '../../shared/schemas/common';
+
+const EVENT_STATUS_VALUES = ['draft', 'published', 'ongoing', 'completed', 'cancelled'] as const;
+
+/**
+ * Accepts a comma-separated list (or repeated) of event statuses — e.g. `?statuses=published,ongoing`.
+ * Used by the drive screens to fetch one tab (Upcoming/Past) as its own paginated query.
+ */
+const eventStatusesCsv = z
+  .union([z.string(), z.array(z.string())])
+  .optional()
+  .transform((value, ctx) => {
+    if (value === undefined) return undefined;
+    const parts = (Array.isArray(value) ? value : value.split(','))
+      .map((part) => part.trim())
+      .filter((part) => part.length > 0);
+    if (parts.length === 0) return undefined;
+    for (const part of parts) {
+      if (!EVENT_STATUS_VALUES.includes(part as (typeof EVENT_STATUS_VALUES)[number])) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `Invalid status: ${part}` });
+        return z.NEVER;
+      }
+    }
+    return parts as (typeof EVENT_STATUS_VALUES)[number][];
+  });
 
 export const createEventSchema = z.object({
   company_id: z.string().uuid(),
@@ -42,8 +66,10 @@ export const createEventSchema = z.object({
 
 export const updateEventSchema = createEventSchema.partial();
 
-export const queryEventsSchema = paginationSchema.merge(sortSchema).extend({
+export const queryEventsSchema = paginationSchema.merge(sortSchema).merge(searchSchema).extend({
   status: z.enum(['draft', 'published', 'ongoing', 'completed', 'cancelled']).optional(),
+  // Multi-status filter (Upcoming/Past tabs → their own paginated query).
+  statuses: eventStatusesCsv,
   type: z.string().min(1).max(150).optional(),
   posting_type_master_id: z.string().uuid().optional(),
   company_id: z.string().uuid().optional(),

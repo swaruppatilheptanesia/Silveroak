@@ -82,7 +82,8 @@ export async function getStudentPortfolio(
       enrollment_number: true,
       department: true,
       batch: true,
-      // course + institute drive the faculty scope check below (not returned in the payload).
+      // branch + course + institute drive the faculty scope check below (not returned in the payload).
+      branch: true,
       course: true,
       institute: true,
     },

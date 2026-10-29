@@ -11,9 +11,12 @@ import type {
   MarkAttendanceInput,
   UpdateEventStatusInput,
 } from './event.schema';
-import { EventStatus, AttendanceStatus, Prisma, ApplicationStage } from '@prisma/client';
+import { EventStatus, AttendanceStatus, Prisma, ApplicationStage, MasterCategory } from '@prisma/client';
 import { buildDateRangeCondition } from '../../shared/utils/student-scope-filter';
+import { resolveFacultyScope, facultyMatchesPostingTypeMaster } from '../../shared/utils/faculty-scope';
+import { getWithdrawnInterestValues } from '../../shared/utils/posting-type-interest';
 import { createNotification, notifyManyUsers } from '../notifications/notification.service';
+import { sendPlaceReadyEventWebhook } from '../../shared/utils/placeready-webhook';
 
 type EventAudienceSource = {
   company_id?: string | null;
@@ -78,13 +81,27 @@ async function countEligibleStudents(
   return rows.length;
 }
 
-/** Add-only assignment of pipeline students (idempotent; no panel, no notify — publish notifies). */
+/**
+ * Add-only assignment of pipeline students (idempotent; no panel). No SOU notify — publish notifies. When the
+ * event is ALREADY published, the newly added students are sent to the PlaceReady app (SR 36), since publish
+ * won't fire again for them.
+ */
 async function assignPipelineStudents(eventId: string, studentIds: string[]) {
   if (studentIds.length === 0) return;
+  const before = await prisma.eventStudent.findMany({
+    where: { event_id: eventId, student_id: { in: studentIds } },
+    select: { student_id: true },
+  });
   await prisma.eventStudent.createMany({
     data: studentIds.map((student_id) => ({ event_id: eventId, student_id })),
     skipDuplicates: true,
   });
+  const existing = new Set(before.map((r) => r.student_id));
+  const added = studentIds.filter((id) => !existing.has(id));
+  if (added.length) {
+    const event = await prisma.event.findUnique({ where: { id: eventId }, select: { status: true } });
+    if (event?.status === 'published') sendPlaceReadyEventWebhook('assigned', eventId, added);
+  }
 }
 
 function normalizeEventTypeValue(value: string) {
@@ -107,25 +124,75 @@ async function assertValidEventType(tenantId: string, value: string) {
   }
 }
 
+/**
+ * The posting-type master ids a faculty coordinator is eligible for — active posting_type masters whose
+ * target scope overlaps the faculty's institute/course/branch assignment. Same predicate as faculty
+ * "My Programs". Drives Department-Events visibility (an event is "related to" a posting type via its
+ * linked posting's posting_type_master_id).
+ */
+async function resolveFacultyEligiblePostingTypeMasterIds(
+  tenantId: string,
+  user: Express.AuthUser
+): Promise<string[]> {
+  const masters = await prisma.masterOption.findMany({
+    where: { tenant_id: tenantId, category: MasterCategory.posting_type, is_active: true },
+    select: { id: true, target_institutes: true, target_courses: true, target_branches: true },
+  });
+  const scope = resolveFacultyScope(user);
+  return masters.filter((master) => facultyMatchesPostingTypeMaster(scope, master)).map((master) => master.id);
+}
+
+/**
+ * The posting-type master ids the student has been WITHDRAWN from. A withdrawn student must not see (or
+ * interact with) events/drives under those posting types — mirrors the postings hide + apply block.
+ * Resolves the withdrawn interest `value`s to master ids (via normalized_value), like the faculty resolver.
+ */
+async function resolveWithdrawnPostingTypeMasterIds(
+  tenantId: string,
+  studentId: string
+): Promise<string[]> {
+  const withdrawnValues = await getWithdrawnInterestValues(studentId);
+  if (withdrawnValues.size === 0) return [];
+  const masters = await prisma.masterOption.findMany({
+    where: {
+      tenant_id: tenantId,
+      category: MasterCategory.posting_type,
+      normalized_value: { in: Array.from(withdrawnValues) },
+    },
+    select: { id: true },
+  });
+  return masters.map((master) => master.id);
+}
+
+/** Excludes events whose linked posting type is one the student was withdrawn from (keeps unlinked events). */
+function applyWithdrawnEventExclusion(where: Record<string, unknown>, withdrawnMasterIds: string[]) {
+  if (withdrawnMasterIds.length === 0) return;
+  where.NOT = { posting: { is: { posting_type_master_id: { in: withdrawnMasterIds } } } };
+}
+
 function applyVisibilityScope(
   where: Record<string, unknown>,
   user: Express.AuthUser,
   scope?: Express.ScopeFilters,
-  filters?: QueryEventsInput
+  filters?: QueryEventsInput,
+  facultyPostingTypeMasterIds?: string[]
 ) {
   const isAdmin = user.role === 'tpo_admin' || user.role === 'tpo_employee';
 
   if (isAdmin) {
-    if (filters?.status) where.status = filters.status;
+    if (filters?.statuses?.length) where.status = { in: filters.statuses };
+    else if (filters?.status) where.status = filters.status;
     return;
   }
 
-  if (filters?.status === 'draft') {
+  if (filters?.statuses?.length) {
+    // Non-admins never see drafts — strip 'draft' from the requested set.
+    const nonDraft = filters.statuses.filter((status) => status !== 'draft');
+    where.status = { in: nonDraft.length > 0 ? nonDraft : ['__no_match_status__'] };
+  } else if (filters?.status === 'draft') {
     where.id = '__no_match__';
     return;
-  }
-
-  if (filters?.status) {
+  } else if (filters?.status) {
     where.status = filters.status;
   } else {
     where.status = { not: 'draft' };
@@ -144,10 +211,13 @@ function applyVisibilityScope(
   }
 
   if (user.role === 'faculty_coordinator') {
-    // Scope by the faculty's USER id (identity link) — the legacy name array is display-only and
-    // an exact-name match was unreliable (titles/spacing). Legacy events with no ids won't match
-    // until re-saved through the coordinator picker.
-    where.faculty_coordinator_ids = { has: user.id };
+    // Faculty see only events whose posting type is one they are eligible for (their "My Programs"
+    // posting types). Empty eligible set → match nothing. Events with no linked posting have no
+    // posting type and are therefore not "related to" any posting type → hidden.
+    const eligibleIds = facultyPostingTypeMasterIds ?? [];
+    where.posting = {
+      is: { posting_type_master_id: { in: eligibleIds.length > 0 ? eligibleIds : ['__no_match__'] } },
+    };
   }
 }
 
@@ -205,10 +275,28 @@ export async function getEvents(
   user: Express.AuthUser,
   scope?: Express.ScopeFilters
 ) {
-  const { page, limit, type, posting_type_master_id, company_id, sort_by, sort_order, institute, course, branch, date_from, date_to } = filters;
+  const { page, limit, type, posting_type_master_id, company_id, sort_by, sort_order, institute, course, branch, date_from, date_to, search } = filters;
   const where: Record<string, unknown> = { tenant_id: tenantId };
 
-  applyVisibilityScope(where, user, scope, filters);
+  const facultyEligibleIds = user.role === 'faculty_coordinator'
+    ? await resolveFacultyEligiblePostingTypeMasterIds(tenantId, user)
+    : undefined;
+
+  applyVisibilityScope(where, user, scope, filters, facultyEligibleIds);
+
+  // A withdrawn student must not see events/drives under the posting type they were withdrawn from.
+  if (user.role === 'student' && scope?.student_id) {
+    const withdrawnMasterIds = await resolveWithdrawnPostingTypeMasterIds(tenantId, scope.student_id);
+    applyWithdrawnEventExclusion(where, withdrawnMasterIds);
+  }
+
+  if (search) {
+    where.OR = [
+      { title: { contains: search, mode: 'insensitive' } },
+      { venue: { contains: search, mode: 'insensitive' } },
+      { company: { is: { name: { contains: search, mode: 'insensitive' } } } },
+    ];
+  }
   if (type) where.type = type;
   // FILTER COUNTER EXPORT — target-array scope + event-date range (admin/tpo screens).
   if (institute) where.target_institutes = { has: institute };
@@ -217,11 +305,15 @@ export async function getEvents(
   const eventDateRange = buildDateRangeCondition(date_from, date_to);
   if (eventDateRange) where.date = eventDateRange;
   if (posting_type_master_id) {
-    where.posting = {
-      is: {
-        posting_type_master_id,
-      },
-    };
+    if (user.role === 'faculty_coordinator') {
+      // Intersect the explicit filter with the faculty's eligible set so it can never widen visibility.
+      const allowed = (facultyEligibleIds ?? []).includes(posting_type_master_id)
+        ? [posting_type_master_id]
+        : ['__no_match__'];
+      where.posting = { is: { posting_type_master_id: { in: allowed } } };
+    } else {
+      where.posting = { is: { posting_type_master_id } };
+    }
   }
   if (company_id && (user.role === 'tpo_admin' || user.role === 'tpo_employee')) {
     where.company_id = company_id;
@@ -271,7 +363,17 @@ export async function getEventById(
     tenant_id: user.tenant_id,
   };
 
-  applyVisibilityScope(where, user, scope);
+  const facultyEligibleIds = user.role === 'faculty_coordinator'
+    ? await resolveFacultyEligiblePostingTypeMasterIds(user.tenant_id, user)
+    : undefined;
+
+  applyVisibilityScope(where, user, scope, undefined, facultyEligibleIds);
+
+  // A withdrawn student cannot open a drive under a posting type they were withdrawn from (hidden as 404).
+  if (user.role === 'student' && scope?.student_id) {
+    const withdrawnMasterIds = await resolveWithdrawnPostingTypeMasterIds(user.tenant_id, scope.student_id);
+    applyWithdrawnEventExclusion(where, withdrawnMasterIds);
+  }
 
   const assignedStudentWhere =
     user.role === 'student'
@@ -287,7 +389,7 @@ export async function getEventById(
       assigned_students: {
         where: assignedStudentWhere,
         include: {
-          student: { select: { id: true, full_name: true, enrollment_number: true, department: true } },
+          student: { select: { id: true, full_name: true, enrollment_number: true, department: true, branch: true } },
         },
       },
     },
@@ -421,8 +523,10 @@ export async function updateEventStatus(eventId: string, data: UpdateEventStatus
     try {
       const assignedStudents = await prisma.eventStudent.findMany({
         where: { event_id: eventId },
-        select: { student: { select: { user_id: true } } },
+        select: { student_id: true, student: { select: { user_id: true } } },
       });
+      // SR 36: the PlaceReady student app gets the same audience.
+      sendPlaceReadyEventWebhook('published', eventId, assignedStudents.map((row) => row.student_id));
       const recipientIds = assignedStudents
         .map((row) => row.student?.user_id)
         .filter((id): id is string => Boolean(id));
@@ -466,6 +570,14 @@ export async function assignStudents(eventId: string, data: AssignStudentsInput)
   const event = await prisma.event.findUnique({ where: { id: eventId } });
   if (!event) throw new NotFoundError('Event');
 
+  const alreadyAssigned = new Set(
+    (
+      await prisma.eventStudent.findMany({
+        where: { event_id: eventId, student_id: { in: data.student_ids } },
+        select: { student_id: true },
+      })
+    ).map((r) => r.student_id),
+  );
   const results = [];
   for (const studentId of data.student_ids) {
     try {
@@ -486,6 +598,8 @@ export async function assignStudents(eventId: string, data: AssignStudentsInput)
 
   try {
     const assignedIds = results.filter((r) => r.status === 'assigned').map((r) => r.student_id);
+    // SR 36: only NEWLY assigned students reach the PlaceReady app (a panel move isn't news).
+    sendPlaceReadyEventWebhook('assigned', eventId, assignedIds.filter((id) => !alreadyAssigned.has(id)));
     if (assignedIds.length > 0) {
       const students = await prisma.student.findMany({
         where: { id: { in: assignedIds } },
@@ -519,15 +633,19 @@ export async function markAttendance(
 ) {
   const event = await prisma.event.findFirst({
     where: { id: eventId, tenant_id: user.tenant_id },
-    select: { id: true, faculty_coordinator_ids: true },
+    select: { id: true, posting: { select: { posting_type_master_id: true } } },
   });
   if (!event) throw new NotFoundError('Event');
 
-  if (user.role === 'faculty_coordinator' && !event.faculty_coordinator_ids.includes(user.id)) {
-    throw new AuthorizationError(
-      'You are not assigned as a faculty coordinator for this event',
-      'ROLE_NOT_ALLOWED'
-    );
+  if (user.role === 'faculty_coordinator') {
+    const eligibleIds = await resolveFacultyEligiblePostingTypeMasterIds(user.tenant_id, user);
+    const eventMasterId = event.posting?.posting_type_master_id ?? null;
+    if (!eventMasterId || !eligibleIds.includes(eventMasterId)) {
+      throw new AuthorizationError(
+        'This event is not related to a posting type you are assigned to',
+        'ROLE_NOT_ALLOWED'
+      );
+    }
   }
 
   const assignment = await prisma.eventStudent.findUnique({

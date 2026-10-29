@@ -271,28 +271,12 @@ const studentApi = {
     return throwIfError(res).resumes;
   },
 
-  uploadResume: async (file: File, name?: string): Promise<ApiResume> => {
-    const formData = new FormData();
-    formData.append('file', file);
-    if (name) formData.append('name', name);
+  uploadResume: async (file: File, name?: string): Promise<ApiResume> =>
+    sendResumeFile('POST', '/students/me/resumes', file, name, 'Upload failed'),
 
-    const baseUrl = import.meta.env.VITE_API_BASE_URL || '/api';
-    const token = (await import('./apiClient')).tokenManager.getAccessToken();
-
-    const response = await fetch(`${baseUrl}/students/me/resumes`, {
-      method: 'POST',
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-      body: formData,
-    });
-
-    if (!response.ok) {
-      const errBody = await response.json().catch(() => ({}));
-      const parsed = parseApiErrorEnvelope(errBody, 'Upload failed');
-      throw new StudentApiError(parsed.message, response.status, parsed.code, parsed.details);
-    }
-
-    return response.json();
-  },
+  /** Replace a resume's file in place — same id, so applications using it keep a valid link. */
+  updateResume: async (resumeId: string, file: File, name?: string): Promise<ApiResume> =>
+    sendResumeFile('PUT', `/students/me/resumes/${resumeId}`, file, name, 'Update failed'),
 
   setDefaultResume: async (resumeId: string): Promise<void> => {
     const res = await apiClient.put<{ message: string }>(`/students/me/resumes/${resumeId}/default`, {});
@@ -339,6 +323,30 @@ const studentApi = {
 };
 
 // ── Combined export (mock + API) ───────────────────────
+
+/** Multipart upload of a resume file (create = POST, in-place replace = PUT). */
+async function sendResumeFile(method: 'POST' | 'PUT', path: string, file: File, name: string | undefined, fallback: string): Promise<ApiResume> {
+  const formData = new FormData();
+  formData.append('file', file);
+  if (name) formData.append('name', name);
+
+  const baseUrl = import.meta.env.VITE_API_BASE_URL || '/api';
+  const token = (await import('./apiClient')).tokenManager.getAccessToken();
+
+  const response = await fetch(`${baseUrl}${path}`, {
+    method,
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const errBody = await response.json().catch(() => ({}));
+    const parsed = parseApiErrorEnvelope(errBody, fallback);
+    throw new StudentApiError(parsed.message, response.status, parsed.code, parsed.details);
+  }
+
+  return response.json();
+}
 
 export const studentService = {
   // Real API methods

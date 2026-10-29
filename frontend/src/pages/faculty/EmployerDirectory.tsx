@@ -1,4 +1,4 @@
-import { useDeferredValue, useMemo, useState } from 'react';
+import { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/table';
 import { SortableTableHead } from '@/components/shared/SortableTableHead';
 import { useServerSort } from '@/hooks/use-server-sort';
+import { ListPager } from '@/components/shared/ListPager';
 import {
   Select,
   SelectContent,
@@ -47,13 +48,17 @@ const EmployerDirectory = () => {
 
   const deferredSearch = useDeferredValue(searchTerm);
   const status = statusFilter === 'all' ? undefined : (statusFilter as 'active' | 'inactive');
+  const [page, setPage] = useState(1);
 
   const { sort_by, sort_order, onSort } = useServerSort<
     'name' | 'industry' | 'status' | 'classification'
-  >('name', 'asc');
+  >('name', 'asc', () => setPage(1));
+
+  useEffect(() => { setPage(1); }, [deferredSearch, status]);
+
   const companiesQuery = useCompanies({
-    page: 1,
-    limit: 1000,
+    page,
+    limit: 20,
     search: deferredSearch || undefined,
     status,
     sort_by,
@@ -244,6 +249,11 @@ const EmployerDirectory = () => {
               </TableBody>
               </Table>
             )}
+            <ListPager
+              page={companiesQuery.data?.pagination.page ?? 1}
+              totalPages={companiesQuery.data?.pagination.totalPages ?? 1}
+              onPageChange={setPage}
+            />
           </CardContent>
         </Card>
       </div>

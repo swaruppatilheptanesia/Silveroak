@@ -17,16 +17,20 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
-import { Users, Search, Download, Mail, Phone, CheckCircle2, XCircle } from 'lucide-react';
+import { Users, Search, Download, Mail, Phone, CheckCircle2, XCircle, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { formatCGPA, formatDate, formatDateTime } from '@/lib/formatters';
+import { formatCGPA, formatDate, formatDateTime, toDateParam } from '@/lib/formatters';
 import { downloadCsvTable } from '@/lib/spreadsheetExport';
+import { ConfirmActionDialog } from '@/components/shared/ConfirmActionDialog';
 import AdminListScopeFilters, { type DateRangeValue } from '@/components/admin/AdminListScopeFilters';
+import { useAuth } from '@/contexts/AuthContext';
+import { hasPermission } from '@/lib/permissionModule';
 import {
   useAdminInterestRegistrations,
   useAdminInterestSummary,
   useApproveInterestRegistration,
   useWithdrawInterestRegistration,
+  useDeleteInterestRegistration,
 } from '@/hooks/use-admin-api';
 import { useMasterValues } from '@/hooks/use-master-api';
 import {
@@ -57,7 +61,6 @@ const cellOrDash = (value: string | number | null | undefined): string => {
 export default function InterestLists() {
   const [selectedInterest, setSelectedInterest] = useState('job');
   const [searchTerm, setSearchTerm] = useState('');
-  const [departmentFilter, setDepartmentFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState<'all' | InterestRegistrationStatus>('all');
   const [instituteFilter, setInstituteFilter] = useState('');
   const [courseFilter, setCourseFilter] = useState('');
@@ -67,31 +70,30 @@ export default function InterestLists() {
   const [dateRange, setDateRange] = useState<DateRangeValue>({ from: undefined, to: undefined });
   const [withdrawTarget, setWithdrawTarget] = useState<{ id: string; name: string } | null>(null);
   const [withdrawReason, setWithdrawReason] = useState('');
+  const [removeTarget, setRemoveTarget] = useState<{ id: string; name: string } | null>(null);
 
+  const { user } = useAuth();
+  const canDelete = hasPermission(user?.permissions, { module: 'interest_lists', action: 'delete' }, user?.role);
   const summaryQuery = useAdminInterestSummary();
   const postingTypeValuesQuery = useMasterValues('posting_type');
   const approveMutation = useApproveInterestRegistration();
   const withdrawMutation = useWithdrawInterestRegistration();
+  const deleteMutation = useDeleteInterestRegistration();
   const scopeParams = {
     institute: instituteFilter || undefined,
     course: courseFilter || undefined,
     branch: branchFilter || undefined,
     semester: semesterFilter === 'all' ? undefined : semesterFilter,
     academic_year: academicYearFilter === 'all' ? undefined : academicYearFilter,
-    date_from: dateRange.from ? dateRange.from.toISOString() : undefined,
-    date_to: dateRange.to ? dateRange.to.toISOString() : undefined,
+    date_from: toDateParam(dateRange.from),
+    date_to: toDateParam(dateRange.to),
   };
   const registrationsQuery = useAdminInterestRegistrations({
     posting_type: selectedInterest,
     search: searchTerm || undefined,
-    department: departmentFilter === 'all' ? undefined : departmentFilter,
     status: statusFilter === 'all' ? undefined : statusFilter,
     ...scopeParams,
   });
-  // Department options must stay stable regardless of the chosen department/search,
-  // so derive them from a program-only query (the backend returns [] when no
-  // posting_type is supplied, which is why the old unfiltered query was always empty).
-  const programStudentsQuery = useAdminInterestRegistrations({ posting_type: selectedInterest });
 
   const summary = summaryQuery.data ?? [];
   const postingTypeSummary = useMemo(() => {
@@ -116,16 +118,6 @@ export default function InterestLists() {
   }, [postingTypeValuesQuery.data, summary]);
 
   const filteredStudents = registrationsQuery.data?.data ?? [];
-  const departments = useMemo(
-    () => [
-      ...new Set(
-        (programStudentsQuery.data?.data ?? [])
-          .map((student) => student.department)
-          .filter((value): value is string => Boolean(value && value.trim())),
-      ),
-    ].sort(),
-    [programStudentsQuery.data],
-  );
 
   useEffect(() => {
     if (postingTypeSummary.length === 0) {
@@ -136,12 +128,6 @@ export default function InterestLists() {
       setSelectedInterest(postingTypeSummary[0].posting_type);
     }
   }, [postingTypeSummary, selectedInterest]);
-
-  // Reset the department filter when switching programs so a stale department
-  // (absent from the new program) doesn't silently empty the list.
-  useEffect(() => {
-    setDepartmentFilter('all');
-  }, [selectedInterest]);
 
   const selectedInterestLabel = postingTypeSummary.find((interest) => interest.posting_type === selectedInterest)?.label
     || getPostingTypeInterestLabel(selectedInterest);
@@ -178,6 +164,17 @@ export default function InterestLists() {
     }
   }
 
+  async function handleConfirmRemove() {
+    if (!removeTarget) return;
+    try {
+      await deleteMutation.mutateAsync(removeTarget.id);
+      toast.success('Registration removed.');
+      setRemoveTarget(null);
+    } catch (error) {
+      toast.error(errorMessage(error, 'Unable to remove this registration.'));
+    }
+  }
+
   const semesterFor = (student: ApiAdminStudent): string | null =>
     student.current_semester
     ?? (student.academicProfile.semester != null ? String(student.academicProfile.semester) : null);
@@ -186,7 +183,7 @@ export default function InterestLists() {
     student: (s) => s.full_name,
     institute: (s) => s.institute_name,
     course: (s) => s.course_name,
-    branch: (s) => s.department,
+    branch: (s) => s.branch ?? '',
     semester: (s) => semesterFor(s),
     cgpa: (s) => s.academicProfile.cgpa,
     registered_on: (s) => { const at = registeredAtFor(s); return at ? new Date(at) : null; },
@@ -207,7 +204,7 @@ export default function InterestLists() {
         student.roll_number || '',
         student.institute_name || '',
         student.course_name || '',
-        student.department || '',
+        student.branch || '',
         student.program_name || '',
         semesterFor(student) || '',
         student.batch_year || '',
@@ -276,19 +273,6 @@ export default function InterestLists() {
                   ))}
                 </SelectContent>
               </Select>
-              <Select value={departmentFilter} onValueChange={setDepartmentFilter}>
-                <SelectTrigger className="w-full md:w-[200px]">
-                  <SelectValue placeholder="All Departments" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Departments</SelectItem>
-                  {departments.map((department) => (
-                    <SelectItem key={department} value={department}>
-                      {department}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
               <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as typeof statusFilter)}>
                 <SelectTrigger className="w-full md:w-[180px]">
                   <SelectValue placeholder="Status" />
@@ -346,7 +330,7 @@ export default function InterestLists() {
                       const interest = interestFor(student);
                       const status = interest?.status;
                       const statusMeta = status ? STATUS_META[status] : null;
-                      const actionsPending = approveMutation.isPending || withdrawMutation.isPending;
+                      const actionsPending = approveMutation.isPending || withdrawMutation.isPending || deleteMutation.isPending;
 
                       return (
                         <TableRow key={student.student_id}>
@@ -359,7 +343,7 @@ export default function InterestLists() {
                           <TableCell>{cellOrDash(student.institute_name)}</TableCell>
                           <TableCell>{cellOrDash(student.course_name)}</TableCell>
                           <TableCell>
-                            <Badge variant="outline">{cellOrDash(student.department)}</Badge>
+                            <Badge variant="outline">{cellOrDash(student.branch)}</Badge>
                           </TableCell>
                           <TableCell>{cellOrDash(semesterFor(student))}</TableCell>
                           <TableCell>
@@ -430,6 +414,18 @@ export default function InterestLists() {
                                   Withdraw
                                 </Button>
                               )}
+                              {interest && canDelete && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="text-destructive hover:text-destructive"
+                                  onClick={() => setRemoveTarget({ id: interest.id, name: student.full_name })}
+                                  disabled={actionsPending}
+                                >
+                                  <Trash2 className="mr-1.5 h-4 w-4" />
+                                  Remove
+                                </Button>
+                              )}
                               {!interest && <span className="text-sm text-muted-foreground">{DASH}</span>}
                             </div>
                           </TableCell>
@@ -471,6 +467,20 @@ export default function InterestLists() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ConfirmActionDialog
+        open={removeTarget !== null}
+        onOpenChange={(open) => { if (!open) setRemoveTarget(null); }}
+        title="Remove registration?"
+        description={
+          `This permanently removes ${removeTarget?.name ?? 'this student'}'s interest registration from ${selectedInterestLabel}. `
+          + 'Unlike Withdraw, this deletes the record entirely (no history is kept). This cannot be undone.'
+        }
+        confirmLabel="Remove"
+        confirmVariant="destructive"
+        isPending={deleteMutation.isPending}
+        onConfirm={handleConfirmRemove}
+      />
     </DashboardLayout>
   );
 }

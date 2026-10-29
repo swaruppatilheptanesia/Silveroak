@@ -9,6 +9,7 @@ import {
 } from '../../shared/utils/jwt';
 import { AuthenticationError, BusinessRuleError, ConflictError, NotFoundError } from '../../shared/errors';
 import { logger } from '../../config/logger';
+import { mailEnabled, sendEmail } from '../../shared/utils/email';
 import { ensureTenantRolePermissions } from '../../shared/permissions';
 import { env } from '../../config/env';
 import type {
@@ -42,9 +43,17 @@ type CrmStudentDetail = {
   instituteName?: string | null;
   courseShortName?: string | null;
   courseFullName?: string | null;
+  branchName?: string | null;
   programName?: string | null;
   admissionYear?: number | string | null;
   currentSemester?: string | null;
+  // Current CRM field names for the academic scores…
+  spi?: number | string | null;
+  cpi?: number | string | null;
+  cgpa?: number | string | null;
+  result_Semester?: number | string | null;
+  result_Status?: string | null;
+  // …and the legacy names the CRM used before (kept as a fallback).
   currentSemesterSPI?: number | string | null;
   currentSemesterCPI?: number | string | null;
   currentSemesterCGPA?: number | string | null;
@@ -58,6 +67,7 @@ type CrmStudentDetail = {
   board12OrDiploma?: string | null;
   passingYear12OrDiploma?: number | string | null;
   percentage12OrDiploma?: number | string | null;
+  passOutDate?: string | null;
 };
 
 type SignupSession = {
@@ -66,6 +76,7 @@ type SignupSession = {
   tenantSlug: string;
   crmStudent: CrmStudentDetail;
   otp: string;
+  attempts: number;
   expiresAt: number;
   verifiedToken?: string;
 };
@@ -125,6 +136,40 @@ function cleanupPasswordResetSessions() {
 
 function createOpaqueToken() {
   return crypto.randomBytes(TOKEN_BYTES).toString('base64url');
+}
+
+// Max wrong OTP entries before the signup session is invalidated (basic brute-force protection).
+const OTP_MAX_ATTEMPTS = 5;
+
+/** A cryptographically-random 6-digit OTP (000000-999999, uniformly distributed incl. leading zeros). */
+function generateOtp(): string {
+  return String(crypto.randomInt(0, 1_000_000)).padStart(6, '0');
+}
+
+/** Masks an email for display: keeps the first 2 local chars, e.g. `jo***@silveroakuni.ac.in`. */
+function maskEmail(email: string): string {
+  const [local, domain] = email.split('@');
+  if (!domain) return '***';
+  const head = local.slice(0, 2);
+  return `${head}${'*'.repeat(Math.max(3, local.length - head.length))}@${domain}`;
+}
+
+function buildSignupOtpEmail(fullName: string, otp: string, validityMinutes: number) {
+  const greeting = fullName ? `Hi ${fullName},` : 'Hi,';
+  return {
+    subject: 'Your Silver Oak T&P registration OTP',
+    htmlBody: `
+      <div style="font-family: Arial, Helvetica, sans-serif; color: #1f2937; line-height: 1.6;">
+        <p>${greeting}</p>
+        <p>Use the following One-Time Password (OTP) to verify your email and complete your Training &amp;
+        Placement portal registration:</p>
+        <p style="font-size: 28px; font-weight: 700; letter-spacing: 6px; margin: 16px 0;">${otp}</p>
+        <p>This OTP is valid for ${validityMinutes} minute${validityMinutes === 1 ? '' : 's'}. Please do not
+        share it with anyone.</p>
+        <p>If you did not request this, you can safely ignore this email.</p>
+        <p style="margin-top: 24px; color: #6b7280;">— Silver Oak University Training &amp; Placement Cell</p>
+      </div>`,
+  };
 }
 
 function getSignupTtlMs() {
@@ -220,6 +265,12 @@ function deriveDepartment(student: CrmStudentDetail): string {
   return cleanString(student.courseShortName) ?? cleanString(student.courseFullName) ?? 'Unassigned';
 }
 
+// Real per-student branch from ERP. Deliberately returns null when the ERP has no `branchName` — the
+// targeting matcher null-gates the branch dimension (falls back to course) rather than a wrong value.
+function deriveBranch(student: CrmStudentDetail): string | null {
+  return cleanString(student.branchName) ?? null;
+}
+
 function parseRomanNumeral(value: string): number | null {
   const romanMap: Record<string, number> = { I: 1, V: 5, X: 10, L: 50 };
   let total = 0;
@@ -250,6 +301,34 @@ function parseSemester(value: string | null | undefined): number | null {
   return roman ? parseRomanNumeral(roman) : null;
 }
 
+/** A positive score, else null (CRM sends null / 0 / '' when a score isn't published). */
+function positiveScore(...values: unknown[]): number | null {
+  for (const v of values) {
+    const n = parseNumber(v);
+    if (n !== null && n > 0) return n;
+  }
+  return null;
+}
+
+/**
+ * The student's SPI / CPI / CGPA from a CRM detail. The CRM renamed these fields (currentSemesterSPI/CPI/
+ * CGPA → spi/cpi/cgpa); reading only the old names stored CGPA 0 for every new student, which failed
+ * eligibility. New names first, legacy names as a fallback.
+ */
+export function crmScores(student: CrmStudentDetail): { spi: number | null; cpi: number | null; cgpa: number | null } {
+  return {
+    spi: positiveScore(student.spi, student.currentSemesterSPI),
+    cpi: positiveScore(student.cpi, student.currentSemesterCPI),
+    cgpa: positiveScore(student.cgpa, student.currentSemesterCGPA),
+  };
+}
+
+/** The CGPA PlaceReady/SOU uses: CRM CGPA, else CPI (SOU's cumulative index), else null. */
+export function crmCgpa(student: CrmStudentDetail): number | null {
+  const s = crmScores(student);
+  return s.cgpa ?? s.cpi;
+}
+
 function buildAcademicSeed(student: CrmStudentDetail): AcademicSeed {
   const board12OrDiploma = cleanString(student.board12OrDiploma)?.toLowerCase() ?? '';
   const secondaryPercentage = parseNumber(student.percentage12OrDiploma);
@@ -257,7 +336,7 @@ function buildAcademicSeed(student: CrmStudentDetail): AcademicSeed {
   const duration = deriveCourseDuration(student);
 
   return {
-    cgpa: parseNumber(student.currentSemesterCGPA) ?? parseNumber(student.currentSemesterCPI) ?? 0,
+    cgpa: crmCgpa(student) ?? 0,
     tenth_percentage: parseNumber(student.percentage10),
     twelfth_percentage: isDiploma ? null : secondaryPercentage,
     diploma_percentage: isDiploma ? secondaryPercentage : null,
@@ -293,7 +372,7 @@ function calculateInitialProfileCompletion(student: CrmStudentDetail, department
   return Math.min(100, completion);
 }
 
-async function fetchStudentFromCrm(enrollmentNo: string): Promise<CrmStudentDetail> {
+export async function fetchStudentFromCrm(enrollmentNo: string): Promise<CrmStudentDetail> {
   if (!env.crmApiKey) {
     throw new BusinessRuleError('CRM API key is not configured', 'CRM_CONFIG_MISSING');
   }
@@ -407,22 +486,59 @@ export async function requestStudentSignupOtp(input: RequestStudentSignupOtpInpu
 
   await assertStudentCanSignup(tenant.id, enrollmentNo, email);
 
+  const fullName = getStudentFullName(crmStudent);
+  const validityMinutes = Math.max(1, env.studentSignupSessionTtlMinutes);
+
+  // OTP delivery is token-gated:
+  //  - mail configured        → generate a real OTP and email it (production behaviour); a send failure
+  //                             fails the request (never pretend an undelivered OTP was sent).
+  //  - not configured + dev   → fall back to the static OTP and skip email so local dev/tests still work.
+  //  - not configured + prod  → refuse (never silently accept the static OTP in production).
+  let otp: string;
+  if (mailEnabled()) {
+    otp = generateOtp();
+    const { subject, htmlBody } = buildSignupOtpEmail(fullName, otp, validityMinutes);
+    try {
+      await sendEmail({ to: email, toName: fullName || undefined, subject, htmlBody });
+    } catch (err) {
+      logger.error({ err, enrollmentNo }, 'Failed to send student signup OTP email');
+      throw new BusinessRuleError(
+        'We could not send the OTP email right now. Please try again in a moment.',
+        'OTP_EMAIL_FAILED',
+      );
+    }
+  } else if (!env.isProduction) {
+    otp = env.studentSignupOtp;
+    logger.warn(
+      { enrollmentNo, otp },
+      'MAIL_ZEPTO_TOKEN not set — using static dev OTP and skipping email (dev only)',
+    );
+  } else {
+    logger.error('MAIL_ZEPTO_TOKEN is not configured; refusing to issue a signup OTP in production');
+    throw new BusinessRuleError(
+      'OTP delivery is not configured. Please contact the placement cell.',
+      'OTP_EMAIL_NOT_CONFIGURED',
+    );
+  }
+
   const signupToken = createOpaqueToken();
   signupSessions.set(signupToken, {
     enrollmentNo,
     tenantId: tenant.id,
     tenantSlug: tenant.slug,
     crmStudent,
-    otp: env.studentSignupOtp,
+    otp,
+    attempts: 0,
     expiresAt: Date.now() + getSignupTtlMs(),
   });
 
-  logger.info({ enrollmentNo, mobile: maskMobile(mobile) }, 'Student signup OTP generated');
+  logger.info({ enrollmentNo, email: maskEmail(email) }, 'Student signup OTP issued');
 
   return {
     signup_token: signupToken,
     enrollment_no: enrollmentNo,
-    full_name: getStudentFullName(crmStudent),
+    full_name: fullName,
+    masked_email: maskEmail(email),
     masked_mobile: maskMobile(mobile),
     message: 'OTP sent successfully',
   };
@@ -431,6 +547,18 @@ export async function requestStudentSignupOtp(input: RequestStudentSignupOtpInpu
 export async function verifyStudentSignupOtp(input: VerifyStudentSignupOtpInput) {
   const session = getSignupSession(input.signup_token);
   if (input.otp !== session.otp) {
+    session.attempts += 1;
+    if (session.attempts >= OTP_MAX_ATTEMPTS) {
+      // Too many wrong tries — invalidate the session so a fresh OTP must be requested.
+      signupSessions.delete(input.signup_token);
+      if (session.verifiedToken) {
+        verifiedSignupTokens.delete(session.verifiedToken);
+      }
+      throw new AuthenticationError(
+        'Too many incorrect attempts. Please request a new OTP.',
+        'OTP_ATTEMPTS_EXCEEDED',
+      );
+    }
     throw new AuthenticationError('Invalid OTP', 'INVALID_OTP');
   }
 
@@ -496,6 +624,7 @@ export async function completeStudentSignup(input: CompleteStudentSignupInput) {
         department,
         batch,
         course: cleanString(student.courseFullName) ?? cleanString(student.courseShortName),
+        branch: deriveBranch(student),
         institute: cleanString(student.instituteName),
         temporary_enrolment_no: cleanString(student.temporaryEnrolmentNo),
         parent_name: cleanString(student.parentName),
@@ -504,15 +633,16 @@ export async function completeStudentSignup(input: CompleteStudentSignupInput) {
         program_name: cleanString(student.programName),
         admission_year: parseInteger(student.admissionYear),
         current_semester: cleanString(student.currentSemester),
-        current_semester_spi: parseNumber(student.currentSemesterSPI),
-        current_semester_cpi: parseNumber(student.currentSemesterCPI),
-        current_semester_cgpa: parseNumber(student.currentSemesterCGPA),
+        current_semester_spi: crmScores(student).spi,
+        current_semester_cpi: crmScores(student).cpi,
+        current_semester_cgpa: crmScores(student).cgpa,
         exam_form_status: cleanString(student.examFormStatus),
         overall_attendance_percentage: parseNumber(student.overallAttendancePercentage),
         board10: cleanString(student.board10),
         passing_year10: parseInteger(student.passingYear10),
         board12_or_diploma: cleanString(student.board12OrDiploma),
         passing_year12_or_diploma: parseInteger(student.passingYear12OrDiploma),
+        pass_out_date: cleanString(student.passOutDate),
         residential_address: cleanString(student.currentAddress),
         permanent_address: cleanString(student.permanentAddress),
         profile_photo_url: cleanString(student.photoUrl),

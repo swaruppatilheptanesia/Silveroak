@@ -36,7 +36,7 @@ export interface NOCRequest {
   
   // NOC Type & Program
   noc_type: NOCType;
-  internship_type?: 'internship' | 'placement' | null;
+  internship_type?: 'internship' | 'placement' | 'internship_placement' | null;
   program: NOCProgram;
   placement_source: PlacementSource;
   
@@ -108,7 +108,16 @@ export interface NOCRequest {
   certificate_url?: string;
   certificate_snapshot?: ApiNocCertificateSnapshot | null;
   rejected_at?: string;
-  
+
+  // Re-issue versioning (optional on the legacy shape).
+  is_active?: boolean;
+  is_reissue?: boolean;
+  previous_noc_id?: string | null;
+  previous_noc?: { noc_number: string | null } | null;
+  reason_for_company_change?: string | null;
+  termination_letter_url?: string | null;
+  termination_letter_name?: string | null;
+
   // Timestamps
   created_at: string;
   updated_at: string;
@@ -213,6 +222,7 @@ export interface ApiNocStudentSummary {
   full_name: string;
   enrollment_number: string;
   department: string;
+  branch?: string | null;
   batch?: string | null;
   current_semester?: string | null;
   course?: string | null;
@@ -241,7 +251,7 @@ export interface ApiNocRecord {
   id: string;
   student_id: string;
   noc_type: NOCType;
-  internship_type?: 'internship' | 'placement' | null;
+  internship_type?: 'internship' | 'placement' | 'internship_placement' | null;
   program: NOCProgram;
   placement_source: PlacementSource;
   drive_id: string | null;
@@ -276,6 +286,14 @@ export interface ApiNocRecord {
   tpo_approved_at: string | null;
   tpo_remarks: string | null;
   noc_number: string | null;
+  // Re-issue versioning. Only the latest record for a noc_number is active.
+  is_active: boolean;
+  is_reissue: boolean;
+  previous_noc_id: string | null;
+  previous_noc?: { noc_number: string | null } | null;
+  reason_for_company_change: string | null;
+  termination_letter_url: string | null;
+  termination_letter_name: string | null;
   start_date: string;
   end_date: string | null;
   issued_at: string | null;
@@ -333,6 +351,9 @@ export interface PaginatedNocs {
 
 export interface NocQueryParams {
   status?: NOCStatus;
+  /** Multi-status filter (faculty Pending/Reviewed tab → its own paginated query). Serialized as CSV. */
+  statuses?: NOCStatus[];
+  search?: string;
   noc_type?: NOCType;
   completion_status?: CompletionCertStatus;
   page?: number;
@@ -349,11 +370,20 @@ export interface NocQueryParams {
   date_to?: string;
 }
 
+export interface FacultyNocSummary {
+  pending_faculty: number;
+  approved_forwarded: number;
+  approved_by_tpo: number;
+  rejected_by_dept: number;
+  rejected_by_tpo: number;
+  total: number;
+}
+
 // ── Input Types ────────────────────────────────────────
 
 export interface CreateNocInput {
   noc_type: NOCType;
-  internship_type?: 'internship' | 'placement' | null;
+  internship_type?: 'internship' | 'placement' | 'internship_placement' | null;
   program: NOCProgram;
   placement_source: PlacementSource;
   drive_id?: string | null;
@@ -380,6 +410,12 @@ export interface CreateNocInput {
   end_date: string | null;
   duration_weeks?: number | null;
   offer_letter_url: string;
+  // Re-issue fields (required by the backend only when is_reissue is true).
+  is_reissue?: boolean;
+  previous_noc_id?: string | null;
+  reason_for_company_change?: string | null;
+  termination_letter_url?: string | null;
+  termination_letter_name?: string | null;
 }
 
 export interface NocSupportingDocumentUpload {
@@ -389,8 +425,33 @@ export interface NocSupportingDocumentUpload {
   document_size: number;
 }
 
+export interface NocTerminationLetterUpload {
+  termination_letter_url: string;
+  termination_letter_name: string;
+  document_mime_type: string;
+  document_size: number;
+}
+
+export interface NocCompanySuggestionRecruiter {
+  name: string | null;
+  phone: string | null;
+  designation: string | null;
+  email: string | null;
+}
+
+export interface NocCompanySuggestion {
+  id: string;
+  name: string;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  pan: string | null;
+  gst: string | null;
+  recruiter: NocCompanySuggestionRecruiter | null;
+}
+
 export interface NocFieldSuggestions {
-  companies: { id: string; name: string }[];
+  companies: NocCompanySuggestion[];
   cities: string[];
   designations: string[];
 }

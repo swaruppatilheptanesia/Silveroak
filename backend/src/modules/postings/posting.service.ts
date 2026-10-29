@@ -40,7 +40,7 @@ async function getStudentTargetContext(
       id: true,
       institute: true,
       course: true,
-      department: true,
+      branch: true,
       academic_profile: {
         select: {
           semester: true,
@@ -58,7 +58,7 @@ async function getStudentTargetContext(
     context: {
       institute: student.institute ?? null,
       course: student.course ?? null,
-      branch: student.department ?? null,
+      branch: student.branch ?? null,
       semester: student.academic_profile?.semester ?? null,
     },
   };
@@ -199,6 +199,7 @@ export async function getPostingById(postingId: string, tenantId?: string, role?
               full_name: true,
               enrollment_number: true,
               department: true,
+              branch: true,
               batch: true,
               profile_photo_url: true,
             },

@@ -67,7 +67,7 @@ import {
 import { usePostingDetail } from '@/hooks/use-posting-api';
 import { useEventDetail, useEvents } from '@/hooks/use-event-api';
 import { SearchableSelect } from '@/components/shared/SearchableSelect';
-import { formatDate, formatDateTime } from '@/lib/formatters';
+import { formatDate, formatDateTime, toDateParam } from '@/lib/formatters';
 import { isPostingApplicationOpen } from '@/lib/postingModule';
 import { resolveBackendAssetUrl } from '@/lib/studentModule';
 import { applicationService } from '@/services/applicationService';
@@ -179,8 +179,8 @@ export default function ApplicationPipeline() {
     institute: instituteFilter || undefined,
     course: courseFilter || undefined,
     branch: branchFilter || undefined,
-    date_from: dateRange.from ? dateRange.from.toISOString() : undefined,
-    date_to: dateRange.to ? dateRange.to.toISOString() : undefined,
+    date_from: toDateParam(dateRange.from),
+    date_to: toDateParam(dateRange.to),
     page,
     limit: 100,
     sort_by,
@@ -242,7 +242,7 @@ export default function ApplicationPipeline() {
         const fields = [
           application.student.full_name,
           application.student.enrollment_number,
-          application.student.department,
+          application.student.branch ?? application.student.department,
         ];
         if (!fields.some((field) => field.toLowerCase().includes(query))) {
           return false;
@@ -638,7 +638,7 @@ export default function ApplicationPipeline() {
                             <div>
                               <p className="font-medium text-foreground">{application.student.full_name}</p>
                               <p className="text-sm text-muted-foreground">
-                                {application.student.enrollment_number} • {application.student.department}
+                                {application.student.enrollment_number} • {application.student.branch ?? application.student.department}
                               </p>
                             </div>
                           </TableCell>
@@ -805,7 +805,7 @@ export default function ApplicationPipeline() {
                   <p className="text-sm text-muted-foreground">Student</p>
                   <p className="font-medium text-foreground">{applicationDetailQuery.data.student.full_name}</p>
                   <p className="text-sm text-muted-foreground">
-                    {applicationDetailQuery.data.student.enrollment_number} • {applicationDetailQuery.data.student.department}
+                    {applicationDetailQuery.data.student.enrollment_number} • {applicationDetailQuery.data.student.branch ?? applicationDetailQuery.data.student.department}
                   </p>
                 </div>
                 <div>

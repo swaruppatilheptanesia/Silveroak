@@ -214,7 +214,7 @@ export function InternshipDetailSheet({
                     <div>
                       <p className="font-medium text-foreground">{internship.student.full_name}</p>
                       <p className="text-sm text-muted-foreground">
-                        {internship.student.enrollment_number} • {internship.student.department}
+                        {internship.student.enrollment_number} • {internship.student.branch ?? internship.student.department}
                         {internship.student.batch ? ` • Batch ${internship.student.batch}` : ''}
                       </p>
                     </div>

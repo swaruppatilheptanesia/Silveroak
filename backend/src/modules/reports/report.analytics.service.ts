@@ -1,5 +1,6 @@
 import { prisma } from '../../config/database';
 import { ValidationError } from '../../shared/errors';
+import { pickCompanyRecruiter } from '../noc/noc.service';
 import { matchesStudentTargeting, matchesStudentTargetingForMaster, normalizeComparable } from '../../shared/utils/student-targeting';
 
 type ReportQuery = Record<string, string | string[] | undefined>;
@@ -169,7 +170,7 @@ type StudentBaseLike = {
   full_name: string;
   email: string;
   mobile: string | null;
-  department: string;
+  branch?: string | null;
   batch: string;
   verification_status: string;
   profile_completion_percentage: number;
@@ -187,7 +188,7 @@ function mapStudentBase(student: StudentBaseLike) {
     enrollment_number: student.enrollment_number,
     email: student.email,
     mobile: student.mobile,
-    department: student.department,
+    branch: student.branch ?? '—',
     batch: student.batch,
     verification_status: student.verification_status,
     profile_completion_percentage: student.profile_completion_percentage,
@@ -279,7 +280,7 @@ function mapOfferBase(offer: {
   admin_override_enabled: boolean;
   created_at: Date;
   updated_at: Date;
-  student: { id: string; full_name: string; enrollment_number: string; department: string; batch: string };
+  student: { id: string; full_name: string; enrollment_number: string; branch?: string | null; batch: string };
   company: { id: string; name: string };
   posting: { id: string; title: string; academic_year: string; posting_type_master?: { value: string } | null };
   audit_trail?: Array<{
@@ -297,7 +298,7 @@ function mapOfferBase(offer: {
     student_id: offer.student.id,
     student_name: offer.student.full_name,
     enrollment_number: offer.student.enrollment_number,
-    department: offer.student.department,
+    branch: offer.student.branch ?? '—',
     batch: offer.student.batch,
     company_id: offer.company.id,
     company_name: offer.company.name,
@@ -354,7 +355,7 @@ function mapInternshipBase(internship: {
     id: string;
     full_name: string;
     enrollment_number: string;
-    department: string;
+    branch?: string | null;
     batch: string;
     verification_status: string;
   };
@@ -365,7 +366,7 @@ function mapInternshipBase(internship: {
     student_id: internship.student.id,
     student_name: internship.student.full_name,
     enrollment_number: internship.student.enrollment_number,
-    department: internship.department ?? internship.student.department,
+    branch: internship.student.branch ?? '—',
     batch: internship.student.batch,
     company_id: internship.company?.id ?? internship.company_id,
     company_name: internship.company?.name ?? internship.company_name,
@@ -519,13 +520,15 @@ function parseMoneyValue(value: string | null | undefined) {
 function getStudentTargetContext(student: {
   institute: string | null;
   course: string | null;
-  department: string;
+  // Real ERP branch feeds the targeting matcher (null-gated). NOT student.department — a courseShortName
+  // in the now-strict branch slot would never match a scope-row branch and would empty the cohort.
+  branch?: string | null;
   academic_profile?: { semester: number | null } | null;
 }) {
   return {
     institute: student.institute,
     course: student.course,
-    branch: student.department,
+    branch: student.branch ?? null,
     semester: student.academic_profile?.semester ?? null,
   };
 }
@@ -533,7 +536,7 @@ function getStudentTargetContext(student: {
 function studentMatchesSelection(student: {
   institute: string | null;
   course: string | null;
-  department: string;
+  branch?: string | null;
   academic_profile?: { semester: number | null } | null;
 }, filters: {
   institutes: string[];
@@ -543,7 +546,7 @@ function studentMatchesSelection(student: {
 }) {
   return matchesSelectedValues(student.institute, filters.institutes)
     && matchesSelectedValues(student.course, filters.courses)
-    && matchesSelectedValues(student.department, filters.branches)
+    && matchesSelectedValues(student.branch, filters.branches)
     && matchesSelectedValues(student.academic_profile?.semester ?? null, filters.semesters);
 }
 
@@ -553,7 +556,7 @@ function studentMatchesSelection(student: {
 
 export async function getInterestedStudentsReport(tenantId: string, query: ReportQuery = {}) {
   const interestType = getQueryString(query, 'interest_type');
-  const department = getQueryString(query, 'department');
+  const branch = getQueryString(query, 'branch');
   const minCgpa = getQueryNumber(query, 'min_cgpa');
   const verifiedOnly = getQueryBoolean(query, 'verified_only');
 
@@ -579,7 +582,7 @@ export async function getInterestedStudentsReport(tenantId: string, query: Repor
   });
 
   const students = registrations.filter((registration) => {
-    if (department && !textMatches(registration.student.department, department)) {
+    if (branch && !textMatches(registration.student.branch, branch)) {
       return false;
     }
 
@@ -612,13 +615,13 @@ export async function getInterestedStudentsReport(tenantId: string, query: Repor
 }
 
 export async function getEligibilityReport(tenantId: string, query: ReportQuery = {}) {
-  const department = getQueryString(query, 'department');
+  const branch = getQueryString(query, 'branch');
   const batch = getQueryString(query, 'batch');
 
   const students = await prisma.student.findMany({
     where: {
       tenant_id: tenantId,
-      ...(department ? { department: { contains: department, mode: 'insensitive' } } : {}),
+      ...(branch ? { branch: { contains: branch, mode: 'insensitive' } } : {}),
       ...(batch ? { batch: { contains: batch, mode: 'insensitive' } } : {}),
     },
     include: {
@@ -670,7 +673,7 @@ export async function getRegistrationSummaryReport(tenantId: string, query: Repo
           id: true,
           full_name: true,
           enrollment_number: true,
-          department: true,
+          branch: true,
           batch: true,
           verification_status: true,
         },
@@ -729,13 +732,13 @@ export async function getRegistrationSummaryReport(tenantId: string, query: Repo
 }
 
 export async function getProfileCompletionReport(tenantId: string, query: ReportQuery = {}) {
-  const department = getQueryString(query, 'department');
+  const branch = getQueryString(query, 'branch');
   const batch = getQueryString(query, 'batch');
 
   const students = await prisma.student.findMany({
     where: {
       tenant_id: tenantId,
-      ...(department ? { department: { contains: department, mode: 'insensitive' } } : {}),
+      ...(branch ? { branch: { contains: branch, mode: 'insensitive' } } : {}),
       ...(batch ? { batch: { contains: batch, mode: 'insensitive' } } : {}),
     },
     select: {
@@ -743,7 +746,7 @@ export async function getProfileCompletionReport(tenantId: string, query: Report
       full_name: true,
       enrollment_number: true,
       roll_number: true,
-      department: true,
+      branch: true,
       batch: true,
       verification_status: true,
       profile_completion_percentage: true,
@@ -772,7 +775,7 @@ export async function getProfileCompletionReport(tenantId: string, query: Report
         full_name: student.full_name,
         enrollment_number: student.enrollment_number,
         roll_number: student.roll_number ?? student.enrollment_number,
-        department: student.department,
+        branch: student.branch ?? '—',
         batch: student.batch,
         verification_status: student.verification_status,
         profile_completion_percentage: student.profile_completion_percentage,
@@ -780,13 +783,13 @@ export async function getProfileCompletionReport(tenantId: string, query: Report
     };
   });
 
-  const departments = Array.from(
-    countBy(students, (student) => student.department).entries()
-  ).map(([departmentName, count]) => {
-    const deptStudents = students.filter((student) => student.department === departmentName);
-    const avgCompletion = average(deptStudents.map((student) => student.profile_completion_percentage));
+  const branches = Array.from(
+    countBy(students, (student) => student.branch ?? '—').entries()
+  ).map(([branchName, count]) => {
+    const branchStudents = students.filter((student) => (student.branch ?? '—') === branchName);
+    const avgCompletion = average(branchStudents.map((student) => student.profile_completion_percentage));
     return {
-      department: departmentName,
+      branch: branchName,
       count,
       avg_completion: avgCompletion,
     };
@@ -798,7 +801,7 @@ export async function getProfileCompletionReport(tenantId: string, query: Report
       count: band.count,
     })),
     bands,
-    departments,
+    branches,
     students,
   };
 }
@@ -1267,7 +1270,7 @@ export async function getEventAttendanceReport(tenantId: string, query: ReportQu
               id: true,
               full_name: true,
               enrollment_number: true,
-              department: true,
+              branch: true,
               batch: true,
             },
           },
@@ -1298,13 +1301,13 @@ export async function getEventAttendanceReport(tenantId: string, query: ReportQu
     }
 
     if (branch) {
-      const eventBranches = event.assigned_students.map((assignment) => assignment.student.department);
+      const eventBranches = event.assigned_students.map((assignment) => assignment.student.branch);
       const eligibleBranches = eventBranches.length > 0 ? eventBranches : [];
       const eventEligibleBranches = eligibleBranches.length > 0
         ? eligibleBranches
         : [];
       const matchesBranch = eventEligibleBranches.some((value) => textMatches(value, branch))
-        || event.assigned_students.some((assignment) => textMatches(assignment.student.department, branch));
+        || event.assigned_students.some((assignment) => textMatches(assignment.student.branch, branch));
       if (!matchesBranch) {
         return false;
       }
@@ -1327,7 +1330,7 @@ export async function getEventAttendanceReport(tenantId: string, query: ReportQu
         student_id: assignment.student.id,
         student_name: assignment.student.full_name,
         roll_number: assignment.student.enrollment_number,
-        branch: assignment.student.department,
+        branch: assignment.student.branch ?? '—',
         batch: assignment.student.batch,
         panel_id: assignment.panel_id,
         panel_name: panel?.panel_name ?? null,
@@ -1364,7 +1367,7 @@ export async function getEventAttendanceReport(tenantId: string, query: ReportQu
       end_time: event.end_time,
       venue: event.venue,
       reporting_time: event.reporting_time,
-      eligible_branches: event.assigned_students.map((assignment) => assignment.student.department),
+      eligible_branches: event.assigned_students.map((assignment) => assignment.student.branch),
       panels: event.panels.map((panel) => ({
         panel_id: panel.id,
         panel_name: panel.panel_name,
@@ -1478,7 +1481,7 @@ export async function getStudentParticipationReport(tenantId: string, query: Rep
   const institute = getQueryString(query, 'institute');
   const course = getQueryString(query, 'course');
   // "branch" maps to the course-derived department column (students carry no separate branch attribute).
-  const branch = getQueryString(query, 'branch') ?? getQueryString(query, 'department');
+  const branch = getQueryString(query, 'branch');
   const type = getQueryString(query, 'type');
   const search = getQueryString(query, 'search');
   const dateRange = parseDateRange(query);
@@ -1486,7 +1489,7 @@ export async function getStudentParticipationReport(tenantId: string, query: Rep
   const studentWhere = {
     ...(institute ? { institute: { contains: institute, mode: 'insensitive' as const } } : {}),
     ...(course ? { course: { contains: course, mode: 'insensitive' as const } } : {}),
-    ...(branch ? { department: { contains: branch, mode: 'insensitive' as const } } : {}),
+    ...(branch ? { branch: { contains: branch, mode: 'insensitive' as const } } : {}),
   };
 
   const assignments = await prisma.eventStudent.findMany({
@@ -1521,7 +1524,7 @@ export async function getStudentParticipationReport(tenantId: string, query: Rep
           enrollment_number: true,
           institute: true,
           course: true,
-          department: true,
+          branch: true,
           batch: true,
         },
       },
@@ -1576,7 +1579,7 @@ export async function getStudentParticipationReport(tenantId: string, query: Rep
       roll_number: assignment.student.enrollment_number,
       institute: assignment.student.institute,
       course: assignment.student.course,
-      branch: assignment.student.department,
+      branch: assignment.student.branch ?? '—',
       total_events: 0,
       present: 0,
       absent: 0,
@@ -1624,7 +1627,7 @@ export async function getStudentParticipationReport(tenantId: string, query: Rep
 }
 
 export async function getPendingNocReport(tenantId: string, query: ReportQuery = {}) {
-  const department = getQueryString(query, 'department');
+  const branch = getQueryString(query, 'branch');
   const nocType = getQueryString(query, 'type');
   const stage = getQueryString(query, 'status');
   const search = getQueryString(query, 'search');
@@ -1633,6 +1636,7 @@ export async function getPendingNocReport(tenantId: string, query: ReportQuery =
   const requests = await prisma.nocRequest.findMany({
     where: {
       tenant_id: tenantId,
+      is_active: true,
       status: {
         in: Array.from(PENDING_NOC_STATUSES) as never,
       },
@@ -1645,7 +1649,7 @@ export async function getPendingNocReport(tenantId: string, query: ReportQuery =
           id: true,
           full_name: true,
           enrollment_number: true,
-          department: true,
+          branch: true,
           batch: true,
         },
       },
@@ -1654,7 +1658,7 @@ export async function getPendingNocReport(tenantId: string, query: ReportQuery =
   });
 
   const filtered = requests.filter((request) => {
-    if (department && !textMatches(request.student.department, department)) {
+    if (branch && !textMatches(request.student.branch, branch)) {
       return false;
     }
     if (!dateMatches(request.created_at, dateRange)) {
@@ -1673,7 +1677,7 @@ export async function getPendingNocReport(tenantId: string, query: ReportQuery =
     student_id: request.student.id,
     student_name: request.student.full_name,
     enrollment_number: request.student.enrollment_number,
-    department: request.student.department,
+    branch: request.student.branch ?? '—',
     batch: request.student.batch,
     noc_type: request.noc_type,
     program: request.program,
@@ -1699,7 +1703,7 @@ export async function getPendingNocReport(tenantId: string, query: ReportQuery =
 }
 
 export async function getIssuedNocRegisterReport(tenantId: string, query: ReportQuery = {}) {
-  const department = getQueryString(query, 'department');
+  const branch = getQueryString(query, 'branch');
   const nocType = getQueryString(query, 'type');
   const search = getQueryString(query, 'search');
   const dateRange = parseDateRange(query);
@@ -1707,6 +1711,7 @@ export async function getIssuedNocRegisterReport(tenantId: string, query: Report
   const requests = await prisma.nocRequest.findMany({
     where: {
       tenant_id: tenantId,
+      is_active: true,
       status: 'issued',
       ...(nocType ? { noc_type: nocType as never } : {}),
     },
@@ -1716,7 +1721,7 @@ export async function getIssuedNocRegisterReport(tenantId: string, query: Report
           id: true,
           full_name: true,
           enrollment_number: true,
-          department: true,
+          branch: true,
           batch: true,
         },
       },
@@ -1731,7 +1736,7 @@ export async function getIssuedNocRegisterReport(tenantId: string, query: Report
   });
 
   const filtered = requests.filter((request) => {
-    if (department && !textMatches(request.student.department, department)) {
+    if (branch && !textMatches(request.student.branch, branch)) {
       return false;
     }
     if (!dateMatches(request.issued_at ?? request.created_at, dateRange)) {
@@ -1752,7 +1757,7 @@ export async function getIssuedNocRegisterReport(tenantId: string, query: Report
     student_id: request.student.id,
     student_name: request.student.full_name,
     enrollment_number: request.student.enrollment_number,
-    department: request.student.department,
+    branch: request.student.branch ?? '—',
     batch: request.student.batch,
     noc_type: request.noc_type,
     company_name: request.company_name,
@@ -1787,6 +1792,7 @@ export async function getNocByDepartmentReport(tenantId: string, query: ReportQu
   const requests = await prisma.nocRequest.findMany({
     where: {
       tenant_id: tenantId,
+      is_active: true,
     },
     include: {
       student: {
@@ -1794,12 +1800,12 @@ export async function getNocByDepartmentReport(tenantId: string, query: ReportQu
           id: true,
           full_name: true,
           enrollment_number: true,
-          department: true,
+          branch: true,
           batch: true,
         },
       },
     },
-    orderBy: [{ student: { department: 'asc' } }, { student: { batch: 'desc' } }],
+    orderBy: [{ student: { branch: 'asc' } }, { student: { batch: 'desc' } }],
   });
 
   const filtered = requests.filter((request) => {
@@ -1826,7 +1832,7 @@ export async function getNocByDepartmentReport(tenantId: string, query: ReportQu
   });
 
   const departmentMap = new Map<string, {
-    department: string;
+    branch: string;
     total: number;
     pending: number;
     approved: number;
@@ -1844,8 +1850,8 @@ export async function getNocByDepartmentReport(tenantId: string, query: ReportQu
   }>();
 
   filtered.forEach((request) => {
-    const dept = departmentMap.get(request.student.department) ?? {
-      department: request.student.department,
+    const dept = departmentMap.get(request.student.branch ?? '—') ?? {
+      branch: request.student.branch ?? '—',
       total: 0,
       pending: 0,
       approved: 0,
@@ -1877,13 +1883,13 @@ export async function getNocByDepartmentReport(tenantId: string, query: ReportQu
     else if (request.status === 'rejected') batch.rejected += 1;
 
     dept.batches.set(request.student.batch, batch);
-    departmentMap.set(request.student.department, dept);
+    departmentMap.set(request.student.branch ?? '—', dept);
   });
 
-  const departments = Array.from(departmentMap.values()).map((dept) => {
+  const branches = Array.from(departmentMap.values()).map((dept) => {
     const decided = dept.approved + dept.issued + dept.rejected;
     return {
-      department: dept.department,
+      branch: dept.branch,
       total: dept.total,
       pending: dept.pending,
       approved: dept.approved,
@@ -1895,10 +1901,10 @@ export async function getNocByDepartmentReport(tenantId: string, query: ReportQu
   }).sort((a, b) => b.total - a.total);
 
   return {
-    departments,
+    branches,
     stats: {
       total: filtered.length,
-      departments: departments.length,
+      branches: branches.length,
       pending: filtered.filter((request) => request.status.startsWith('pending')).length,
       issued: filtered.filter((request) => request.status === 'issued').length,
     },
@@ -1912,7 +1918,7 @@ export async function getApplicantListReport(tenantId: string, query: ReportQuer
   }
 
   const postingType = getPostingTypeQuery(query);
-  const department = getQueryString(query, 'department');
+  const branch = getQueryString(query, 'branch');
   const stage = getQueryString(query, 'stage');
   const search = getQueryString(query, 'search');
   const dateRange = parseDateRange(query);
@@ -1961,7 +1967,7 @@ export async function getApplicantListReport(tenantId: string, query: ReportQuer
   });
 
   const filtered = applications.filter((application) => {
-    if (department && !textMatches(application.student.department, department)) {
+    if (branch && !textMatches(application.student.branch, branch)) {
       return false;
     }
     if (!dateMatches(application.applied_at, dateRange)) {
@@ -1981,7 +1987,7 @@ export async function getApplicantListReport(tenantId: string, query: ReportQuer
     student_id: application.student.id,
     student_name: application.student.full_name,
     enrollment_number: application.student.enrollment_number,
-    department: application.student.department,
+    branch: application.student.branch ?? '—',
     batch: application.student.batch,
     cgpa: toNullableNumber(application.student.academic_profile?.cgpa),
     posting_id: application.posting.id,
@@ -2115,7 +2121,7 @@ export async function getShortlistRejectionReport(tenantId: string, query: Repor
   const postingId = getQueryString(query, 'posting_id');
   const companyId = getQueryString(query, 'company_id');
   const postingType = getPostingTypeQuery(query);
-  const department = getQueryString(query, 'department');
+  const branch = getQueryString(query, 'branch');
   const search = getQueryString(query, 'search');
 
   const postingFilter = companyId || postingType
@@ -2132,7 +2138,7 @@ export async function getShortlistRejectionReport(tenantId: string, query: Repor
       tenant_id: tenantId,
       ...(postingId ? { posting_id: postingId } : {}),
       ...postingFilter,
-      ...(department ? { student: { department: { contains: department, mode: 'insensitive' } } } : {}),
+      ...(branch ? { student: { branch: { contains: branch, mode: 'insensitive' } } } : {}),
     },
     include: {
       student: {
@@ -2140,7 +2146,7 @@ export async function getShortlistRejectionReport(tenantId: string, query: Repor
           id: true,
           full_name: true,
           enrollment_number: true,
-          department: true,
+          branch: true,
           batch: true,
         },
       },
@@ -2188,7 +2194,7 @@ export async function getShortlistRejectionReport(tenantId: string, query: Repor
       id: string;
       name: string;
       rollNo: string;
-      department: string;
+      branch: string;
       stage: string;
       outcome: 'shortlisted' | 'rejected' | 'pending';
       remarks: string | null;
@@ -2227,7 +2233,7 @@ export async function getShortlistRejectionReport(tenantId: string, query: Repor
       id: application.id,
       name: application.student.full_name,
       rollNo: application.student.enrollment_number,
-      department: application.student.department,
+      branch: application.student.branch ?? '—',
       stage: application.current_stage,
       outcome,
       remarks: application.feedback[0]?.remarks ?? null,
@@ -2266,7 +2272,7 @@ export async function getShortlistRejectionReport(tenantId: string, query: Repor
 export async function getOfferAcceptanceReport(tenantId: string, query: ReportQuery = {}) {
   const academicYear = getQueryString(query, 'academic_year');
   const companyId = getQueryString(query, 'company_id');
-  const department = getQueryString(query, 'department');
+  const branch = getQueryString(query, 'branch');
   const batch = getQueryString(query, 'batch');
   const postingType = getPostingTypeQuery(query);
   const search = getQueryString(query, 'search');
@@ -2284,7 +2290,7 @@ export async function getOfferAcceptanceReport(tenantId: string, query: ReportQu
           id: true,
           full_name: true,
           enrollment_number: true,
-          department: true,
+          branch: true,
           batch: true,
         },
       },
@@ -2310,7 +2316,7 @@ export async function getOfferAcceptanceReport(tenantId: string, query: ReportQu
     if (academicYear && !textMatches(offer.posting.academic_year, academicYear)) {
       return false;
     }
-    if (department && !textMatches(offer.student.department, department)) {
+    if (branch && !textMatches(offer.student.branch, branch)) {
       return false;
     }
     if (batch && !textMatches(offer.student.batch, batch)) {
@@ -2361,7 +2367,7 @@ export async function getOfferAcceptanceReport(tenantId: string, query: ReportQu
 export async function getJoiningStatusReport(tenantId: string, query: ReportQuery = {}) {
   const academicYear = getQueryString(query, 'academic_year');
   const companyId = getQueryString(query, 'company_id');
-  const department = getQueryString(query, 'department');
+  const branch = getQueryString(query, 'branch');
   const batch = getQueryString(query, 'batch');
   const postingType = getPostingTypeQuery(query);
   const search = getQueryString(query, 'search');
@@ -2380,7 +2386,7 @@ export async function getJoiningStatusReport(tenantId: string, query: ReportQuer
           id: true,
           full_name: true,
           enrollment_number: true,
-          department: true,
+          branch: true,
           batch: true,
         },
       },
@@ -2416,7 +2422,7 @@ export async function getJoiningStatusReport(tenantId: string, query: ReportQuer
     if (academicYear && !textMatches(offer.posting.academic_year, academicYear)) {
       return false;
     }
-    if (department && !textMatches(offer.student.department, department)) {
+    if (branch && !textMatches(offer.student.branch, branch)) {
       return false;
     }
     if (batch && !textMatches(offer.student.batch, batch)) {
@@ -2449,7 +2455,7 @@ export async function getJoiningStatusReport(tenantId: string, query: ReportQuer
 }
 
 export async function getComplianceReport(tenantId: string, query: ReportQuery = {}) {
-  const department = getQueryString(query, 'department');
+  const branch = getQueryString(query, 'branch');
   const postingType = getPostingTypeQuery(query);
   const search = getQueryString(query, 'search');
 
@@ -2464,7 +2470,7 @@ export async function getComplianceReport(tenantId: string, query: ReportQuery =
           id: true,
           full_name: true,
           enrollment_number: true,
-          department: true,
+          branch: true,
           batch: true,
         },
       },
@@ -2497,7 +2503,7 @@ export async function getComplianceReport(tenantId: string, query: ReportQuery =
   });
 
   const filtered = offers.filter((offer) => {
-    if (department && !textMatches(offer.student.department, department)) {
+    if (branch && !textMatches(offer.student.branch, branch)) {
       return false;
     }
     if (search && !(
@@ -2524,7 +2530,7 @@ export async function getComplianceReport(tenantId: string, query: ReportQuery =
 }
 
 export async function getInternshipStatusReport(tenantId: string, query: ReportQuery = {}) {
-  const department = getQueryString(query, 'department');
+  const branch = getQueryString(query, 'branch');
   const companyId = getQueryString(query, 'company_id');
   const internshipType = getQueryString(query, 'type');
   const status = getQueryString(query, 'status');
@@ -2535,7 +2541,7 @@ export async function getInternshipStatusReport(tenantId: string, query: ReportQ
     where: {
       tenant_id: tenantId,
       ...(companyId ? { company_id: companyId } : {}),
-      ...(department ? { department: { contains: department, mode: 'insensitive' } } : {}),
+      ...(branch ? { student: { branch: { contains: branch, mode: 'insensitive' } } } : {}),
       ...(internshipType ? { internship_type: internshipType as never } : {}),
       ...(status ? { status: status as never } : {}),
     },
@@ -2545,7 +2551,7 @@ export async function getInternshipStatusReport(tenantId: string, query: ReportQ
           id: true,
           full_name: true,
           enrollment_number: true,
-          department: true,
+          branch: true,
           batch: true,
           verification_status: true,
         },
@@ -2587,7 +2593,7 @@ export async function getInternshipStatusReport(tenantId: string, query: ReportQ
 }
 
 export async function getCertificatePendingReport(tenantId: string, query: ReportQuery = {}) {
-  const department = getQueryString(query, 'department');
+  const branch = getQueryString(query, 'branch');
   const companyId = getQueryString(query, 'company_id');
   const batch = getQueryString(query, 'batch');
   const search = getQueryString(query, 'search');
@@ -2601,7 +2607,7 @@ export async function getCertificatePendingReport(tenantId: string, query: Repor
         not: 'discontinued',
       },
       ...(companyId ? { company_id: companyId } : {}),
-      ...(department ? { department: { contains: department, mode: 'insensitive' } } : {}),
+      ...(branch ? { student: { branch: { contains: branch, mode: 'insensitive' } } } : {}),
     },
     include: {
       student: {
@@ -2609,7 +2615,7 @@ export async function getCertificatePendingReport(tenantId: string, query: Repor
           id: true,
           full_name: true,
           enrollment_number: true,
-          department: true,
+          branch: true,
           batch: true,
           verification_status: true,
         },
@@ -2667,7 +2673,7 @@ export async function getCertificatePendingReport(tenantId: string, query: Repor
 
 export async function getCompanyInternshipReport(tenantId: string, query: ReportQuery = {}) {
   const companyId = getQueryString(query, 'company_id');
-  const department = getQueryString(query, 'department');
+  const branch = getQueryString(query, 'branch');
   const batch = getQueryString(query, 'batch');
   const search = getQueryString(query, 'search');
   const dateRange = parseDateRange(query);
@@ -2676,7 +2682,7 @@ export async function getCompanyInternshipReport(tenantId: string, query: Report
     where: {
       tenant_id: tenantId,
       ...(companyId ? { company_id: companyId } : {}),
-      ...(department ? { department: { contains: department, mode: 'insensitive' } } : {}),
+      ...(branch ? { student: { branch: { contains: branch, mode: 'insensitive' } } } : {}),
     },
     include: {
       student: {
@@ -2684,7 +2690,7 @@ export async function getCompanyInternshipReport(tenantId: string, query: Report
           id: true,
           full_name: true,
           enrollment_number: true,
-          department: true,
+          branch: true,
           batch: true,
           verification_status: true,
         },
@@ -2708,7 +2714,7 @@ export async function getCompanyInternshipReport(tenantId: string, query: Report
     }
     if (search && !(
       textMatches(internship.company?.name ?? internship.company_name, search)
-      || textMatches(internship.student.department, search)
+      || textMatches(internship.student.branch, search)
       || textMatches(internship.student.full_name, search)
     )) {
       return false;
@@ -2733,7 +2739,7 @@ export async function getCompanyInternshipReport(tenantId: string, query: Report
       completed: companyInternships.filter((internship) => internship.status === 'completed').length,
       discontinued: companyInternships.filter((internship) => internship.status === 'discontinued').length,
       avgStipend,
-      departments: Array.from(new Set(companyInternships.map((internship) => internship.student.department))).sort(),
+      branches: Array.from(new Set(companyInternships.map((internship) => internship.student.branch ?? '—'))).sort(),
       batches: Array.from(new Set(companyInternships.map((internship) => internship.student.batch))).sort(),
     };
   }).sort((a, b) => b.total - a.total);
@@ -2750,14 +2756,14 @@ export async function getCompanyInternshipReport(tenantId: string, query: Report
 }
 
 export async function getPortfolioCompletionReport(tenantId: string, query: ReportQuery = {}) {
-  const department = getQueryString(query, 'department');
+  const branch = getQueryString(query, 'branch');
   const batch = getQueryString(query, 'batch');
   const search = getQueryString(query, 'search');
 
   const students = await prisma.student.findMany({
     where: {
       tenant_id: tenantId,
-      ...(department ? { department: { contains: department, mode: 'insensitive' } } : {}),
+      ...(branch ? { branch: { contains: branch, mode: 'insensitive' } } : {}),
       ...(batch ? { batch: { contains: batch, mode: 'insensitive' } } : {}),
     },
     include: {
@@ -2776,7 +2782,7 @@ export async function getPortfolioCompletionReport(tenantId: string, query: Repo
     return (
       textMatches(student.full_name, search)
       || textMatches(student.enrollment_number, search)
-      || textMatches(student.department, search)
+      || textMatches(student.branch, search)
     );
   }).map((student) => {
     const portfolio = student.portfolio ?? null;
@@ -2784,7 +2790,7 @@ export async function getPortfolioCompletionReport(tenantId: string, query: Repo
       student_id: student.id,
       full_name: student.full_name,
       enrollment_number: student.enrollment_number,
-      department: student.department,
+      branch: student.branch ?? '—',
       batch: student.batch,
       status: portfolio?.status ?? 'draft',
       project_count: portfolio?.project_count ?? 0,
@@ -2815,14 +2821,14 @@ export async function getPortfolioCompletionReport(tenantId: string, query: Repo
 }
 
 export async function getPublishedPortfoliosReport(tenantId: string, query: ReportQuery = {}) {
-  const department = getQueryString(query, 'department');
+  const branch = getQueryString(query, 'branch');
   const batch = getQueryString(query, 'batch');
   const search = getQueryString(query, 'search');
 
   const students = await prisma.student.findMany({
     where: {
       tenant_id: tenantId,
-      ...(department ? { department: { contains: department, mode: 'insensitive' } } : {}),
+      ...(branch ? { branch: { contains: branch, mode: 'insensitive' } } : {}),
       ...(batch ? { batch: { contains: batch, mode: 'insensitive' } } : {}),
     },
     include: {
@@ -2841,7 +2847,7 @@ export async function getPublishedPortfoliosReport(tenantId: string, query: Repo
     return (
       textMatches(student.full_name, search)
       || textMatches(student.enrollment_number, search)
-      || textMatches(student.department, search)
+      || textMatches(student.branch, search)
     );
   }).map((student) => {
     const portfolio = student.portfolio;
@@ -2853,7 +2859,7 @@ export async function getPublishedPortfoliosReport(tenantId: string, query: Repo
       student_id: student.id,
       full_name: student.full_name,
       enrollment_number: student.enrollment_number,
-      department: student.department,
+      branch: student.branch ?? '—',
       batch: student.batch,
       project_count: portfolio.project_count,
       internship_count: portfolio.internship_count,
@@ -2861,16 +2867,16 @@ export async function getPublishedPortfoliosReport(tenantId: string, query: Repo
     };
   }).filter((portfolio): portfolio is NonNullable<typeof portfolio> => Boolean(portfolio));
 
-  const departmentBreakdown = Array.from(
-    countBy(portfolios, (portfolio) => portfolio.department).entries()
+  const branchBreakdown = Array.from(
+    countBy(portfolios, (portfolio) => portfolio.branch).entries()
   ).sort((a, b) => b[1] - a[1]);
 
   return {
     portfolios,
-    department_breakdown: departmentBreakdown,
+    branch_breakdown: branchBreakdown,
     stats: {
       total: portfolios.length,
-      departments: new Set(portfolios.map((portfolio) => portfolio.department)).size,
+      branches: new Set(portfolios.map((portfolio) => portfolio.branch)).size,
     },
   };
 }
@@ -2978,7 +2984,7 @@ export async function getConsentTrackingReport(tenantId: string, query: ReportQu
           id: true,
           full_name: true,
           enrollment_number: true,
-          department: true,
+          branch: true,
           batch: true,
         },
       },
@@ -3001,7 +3007,7 @@ export async function getConsentTrackingReport(tenantId: string, query: ReportQu
     student_id: receipt.student.id,
     student_name: receipt.student.full_name,
     roll_number: receipt.student.enrollment_number,
-    department: receipt.student.department,
+    branch: receipt.student.branch ?? '—',
     batch: receipt.student.batch,
     read_at: receipt.is_read ? receipt.read_at : null,
     consent_given: receipt.has_consented,
@@ -3025,14 +3031,14 @@ export async function getConsentTrackingReport(tenantId: string, query: ReportQu
 
 export async function getPlacementSummaryReport(tenantId: string, query: ReportQuery = {}) {
   const academicYear = getQueryString(query, 'academic_year');
-  const department = getQueryString(query, 'department');
+  const branch = getQueryString(query, 'branch');
   const batch = getQueryString(query, 'batch');
 
   const [students, offers] = await Promise.all([
     prisma.student.findMany({
       where: {
         tenant_id: tenantId,
-        ...(department ? { department: { contains: department, mode: 'insensitive' } } : {}),
+        ...(branch ? { branch: { contains: branch, mode: 'insensitive' } } : {}),
         ...(batch ? { batch: { contains: batch, mode: 'insensitive' } } : {}),
       },
       include: {
@@ -3048,7 +3054,7 @@ export async function getPlacementSummaryReport(tenantId: string, query: ReportQ
         student: {
           select: {
             id: true,
-            department: true,
+            branch: true,
             batch: true,
           },
         },
@@ -3063,7 +3069,7 @@ export async function getPlacementSummaryReport(tenantId: string, query: ReportQ
 
   const studentRows = students.map((student) => ({
     student_id: student.id,
-    department: student.department,
+    branch: student.branch ?? '—',
     batch: student.batch,
     cgpa: toNullableNumber(student.academic_profile?.cgpa),
   }));
@@ -3072,7 +3078,7 @@ export async function getPlacementSummaryReport(tenantId: string, query: ReportQ
     if (academicYear && !textMatches(offer.posting.academic_year, academicYear)) {
       return false;
     }
-    if (department && !textMatches(offer.student.department, department)) {
+    if (branch && !textMatches(offer.student.branch, branch)) {
       return false;
     }
     if (batch && !textMatches(offer.student.batch, batch)) {
@@ -3082,7 +3088,7 @@ export async function getPlacementSummaryReport(tenantId: string, query: ReportQ
   }).filter((offer) => offer.joining_status !== 'did_not_join');
 
   const departmentMap = new Map<string, {
-    department: string;
+    branch: string;
     totalStudents: number;
     totalOffers: number;
     placed: number;
@@ -3093,11 +3099,11 @@ export async function getPlacementSummaryReport(tenantId: string, query: ReportQ
     placementRate: number;
   }>();
 
-  const departments = Array.from(new Set(studentRows.map((student) => student.department))).sort();
+  const branches = Array.from(new Set(studentRows.map((student) => student.branch ?? '—'))).sort();
 
-  departments.forEach((dept) => {
-    const deptStudents = studentRows.filter((student) => student.department === dept);
-    const deptOffers = filteredOffers.filter((offer) => offer.student.department === dept);
+  branches.forEach((dept) => {
+    const deptStudents = studentRows.filter((student) => (student.branch ?? '—') === dept);
+    const deptOffers = filteredOffers.filter((offer) => (offer.student.branch ?? '—') === dept);
     const placed = deptOffers.filter((offer) => offer.type === 'job' && isPlacedOffer(offer)).length;
     const interned = deptOffers.filter((offer) => offer.type === 'internship' && isPlacedOffer(offer)).length;
     const joined = deptOffers.filter((offer) => offer.joining_status === 'joined').length;
@@ -3107,7 +3113,7 @@ export async function getPlacementSummaryReport(tenantId: string, query: ReportQ
       .filter((value) => Number.isFinite(value) && value > 0);
 
     departmentMap.set(dept, {
-      department: dept,
+      branch: dept,
       totalStudents: deptStudents.length,
       totalOffers: deptOffers.length,
       placed,
@@ -3132,7 +3138,7 @@ export async function getPlacementSummaryReport(tenantId: string, query: ReportQ
   const overallRate = totals.students > 0 ? ((totals.placed + totals.interned) / totals.students) * 100 : 0;
 
   return {
-    departments: deptRows,
+    branches: deptRows,
     stats: {
       ...totals,
       overall_rate: Number(overallRate.toFixed(1)),
@@ -3209,7 +3215,7 @@ export async function getPlacementCellReport(tenantId: string, query: ReportQuer
         id: true,
         institute: true,
         course: true,
-        department: true,
+        branch: true,
         academic_profile: {
           select: {
             semester: true,
@@ -3323,6 +3329,7 @@ export async function getPlacementCellReport(tenantId: string, query: ReportQuer
     ? await prisma.nocRequest.findMany({
       where: {
         tenant_id: tenantId,
+        is_active: true,
         status: 'issued',
         student_id: { in: placedStudentIdsArray },
       },
@@ -3477,7 +3484,7 @@ export async function getCompanyPerformanceReport(tenantId: string, query: Repor
 
 export async function getOfferToJoinFunnelReport(tenantId: string, query: ReportQuery = {}) {
   const academicYear = getQueryString(query, 'academic_year');
-  const department = getQueryString(query, 'department');
+  const branch = getQueryString(query, 'branch');
   const batch = getQueryString(query, 'batch');
   const postingType = getPostingTypeQuery(query);
   const search = getQueryString(query, 'search');
@@ -3494,7 +3501,7 @@ export async function getOfferToJoinFunnelReport(tenantId: string, query: Report
           id: true,
           full_name: true,
           enrollment_number: true,
-          department: true,
+          branch: true,
           batch: true,
         },
       },
@@ -3520,7 +3527,7 @@ export async function getOfferToJoinFunnelReport(tenantId: string, query: Report
     if (academicYear && !textMatches(offer.posting.academic_year, academicYear)) {
       return false;
     }
-    if (department && !textMatches(offer.student.department, department)) {
+    if (branch && !textMatches(offer.student.branch, branch)) {
       return false;
     }
     if (batch && !textMatches(offer.student.batch, batch)) {
@@ -3574,7 +3581,7 @@ export async function getUnplacedStudentsReport(tenantId: string, query: ReportQ
   const institute = getQueryString(query, 'institute');
   const course = getQueryString(query, 'course');
   // "branch" maps to the course-derived department column (students carry no separate branch attribute).
-  const branch = getQueryString(query, 'branch') ?? getQueryString(query, 'department');
+  const branch = getQueryString(query, 'branch');
   const semester = getQueryString(query, 'semester');
   const batch = getQueryString(query, 'batch');
   const search = getQueryString(query, 'search');
@@ -3586,7 +3593,7 @@ export async function getUnplacedStudentsReport(tenantId: string, query: ReportQ
         tenant_id: tenantId,
         ...(institute ? { institute: { contains: institute, mode: 'insensitive' } } : {}),
         ...(course ? { course: { contains: course, mode: 'insensitive' } } : {}),
-        ...(branch ? { department: { contains: branch, mode: 'insensitive' } } : {}),
+        ...(branch ? { branch: { contains: branch, mode: 'insensitive' } } : {}),
         ...(batch ? { batch: { contains: batch, mode: 'insensitive' } } : {}),
       },
       include: {
@@ -3641,14 +3648,13 @@ export async function getUnplacedStudentsReport(tenantId: string, query: ReportQ
     semester: student.current_semester ?? student.academic_profile?.semester ?? null,
   }));
 
-  // Breakdown by branch (= department); students carry no separate branch attribute.
+  // Breakdown by the real ERP branch.
   const branchBreakdown = Array.from(
-    countBy(unplaced, (student) => student.department).entries()
+    countBy(unplaced, (student) => student.branch).entries()
   ).sort((a, b) => b[1] - a[1]);
 
   return {
     students: unplaced,
-    dept_breakdown: branchBreakdown,
     branch_breakdown: branchBreakdown,
     stats: {
       total: unplaced.length,
@@ -3672,7 +3678,7 @@ type NewReportStudent = {
   id: string;
   institute: string | null;
   course: string | null;
-  department: string;
+  branch: string | null;
   batch: string | null;
   current_semester: string | null;
   academic_profile?: { semester: number | null; cgpa?: unknown } | null;
@@ -3709,7 +3715,7 @@ function parseNewReportScope(query: ReportQuery): NewReportScope {
 function studentInReportScope(student: NewReportStudent, scope: NewReportScope): boolean {
   return matchesSelectedValues(student.institute, scope.institutes)
     && matchesSelectedValues(student.course, scope.courses)
-    && matchesSelectedValues(student.department, scope.branches)
+    && matchesSelectedValues(student.branch, scope.branches)
     && matchesSelectedValues(resolveStudentSemester(student), scope.semesters)
     && (!scope.academicYear || textMatches(student.batch, scope.academicYear));
 }
@@ -3718,7 +3724,7 @@ function groupKeyForStudent(student: NewReportStudent) {
   return [
     student.institute ?? '—',
     student.course ?? '—',
-    student.department ?? '—',
+    student.branch ?? '—',
     resolveStudentSemester(student) ?? '—',
   ].join('||');
 }
@@ -3737,6 +3743,7 @@ export async function getPlacementCountReport(tenantId: string, query: ReportQue
         target_courses: true,
         target_branches: true,
         target_semesters: true,
+        scope_rows: true,
       },
     }),
     prisma.student.findMany({
@@ -3745,7 +3752,7 @@ export async function getPlacementCountReport(tenantId: string, query: ReportQue
         id: true,
         institute: true,
         course: true,
-        department: true,
+        branch: true,
         batch: true,
         current_semester: true,
         academic_profile: { select: { semester: true, cgpa: true } },
@@ -3767,7 +3774,7 @@ export async function getPlacementCountReport(tenantId: string, query: ReportQue
       },
     }),
     prisma.nocRequest.findMany({
-      where: { tenant_id: tenantId },
+      where: { tenant_id: tenantId, is_active: true },
       select: { student_id: true, program: true, status: true },
     }),
     prisma.internship.findMany({
@@ -3798,7 +3805,7 @@ export async function getPlacementCountReport(tenantId: string, query: ReportQue
     const cohort = scopedStudents.filter((student) => matchesStudentTargetingForMaster(master, {
       institute: student.institute,
       course: student.course,
-      branch: student.department,
+      branch: student.branch ?? null,
       semester: student.academic_profile?.semester ?? null,
     }));
 
@@ -3830,7 +3837,7 @@ export async function getPlacementCountReport(tenantId: string, query: ReportQue
         academic_year: scope.academicYear ?? null,
         institute: sample.institute ?? '—',
         course: sample.course ?? '—',
-        branch: sample.department ?? '—',
+        branch: sample.branch ?? '—',
         semester: resolveStudentSemester(sample) ?? '—',
         total_students: groupStudents.length,
         registered_students: registered,
@@ -3888,7 +3895,7 @@ export async function getPlacementListingReport(tenantId: string, query: ReportQ
             full_name: true,
             institute: true,
             course: true,
-            department: true,
+            branch: true,
             batch: true,
             current_semester: true,
             mobile: true,
@@ -3901,7 +3908,7 @@ export async function getPlacementListingReport(tenantId: string, query: ReportQ
       orderBy: { student: { full_name: 'asc' } },
     }),
     prisma.nocRequest.findMany({
-      where: { tenant_id: tenantId },
+      where: { tenant_id: tenantId, is_active: true },
       select: { student_id: true, status: true, offer_letter_url: true },
     }),
     prisma.internship.findMany({
@@ -3931,7 +3938,7 @@ export async function getPlacementListingReport(tenantId: string, query: ReportQ
         id: student.id,
         institute: student.institute,
         course: student.course,
-        department: student.department,
+        branch: student.branch ?? '—',
         batch: student.batch,
         current_semester: student.current_semester,
         academic_profile: student.academic_profile,
@@ -3947,7 +3954,7 @@ export async function getPlacementListingReport(tenantId: string, query: ReportQ
         student_name: student.full_name,
         institute: student.institute ?? null,
         course: student.course ?? null,
-        branch: student.department,
+        branch: student.branch ?? '—',
         semester: resolveStudentSemester({ current_semester: student.current_semester, academic_profile: student.academic_profile }),
         contact: student.mobile ?? null,
         email: student.email,
@@ -3986,6 +3993,7 @@ export async function getInternshipNocCountReport(tenantId: string, query: Repor
         target_courses: true,
         target_branches: true,
         target_semesters: true,
+        scope_rows: true,
       },
     }),
     prisma.student.findMany({
@@ -3994,14 +4002,14 @@ export async function getInternshipNocCountReport(tenantId: string, query: Repor
         id: true,
         institute: true,
         course: true,
-        department: true,
+        branch: true,
         batch: true,
         current_semester: true,
         academic_profile: { select: { semester: true } },
       },
     }),
     prisma.nocRequest.findMany({
-      where: { tenant_id: tenantId },
+      where: { tenant_id: tenantId, is_active: true },
       select: {
         student_id: true,
         program: true,
@@ -4031,7 +4039,7 @@ export async function getInternshipNocCountReport(tenantId: string, query: Repor
     const cohort = scopedStudents.filter((student) => matchesStudentTargetingForMaster(master, {
       institute: student.institute,
       course: student.course,
-      branch: student.department,
+      branch: student.branch ?? null,
       semester: student.academic_profile?.semester ?? null,
     }));
 
@@ -4052,7 +4060,7 @@ export async function getInternshipNocCountReport(tenantId: string, query: Repor
         academic_year: scope.academicYear ?? null,
         institute: sample.institute ?? '—',
         course: sample.course ?? '—',
-        branch: sample.department ?? '—',
+        branch: sample.branch ?? '—',
         semester: resolveStudentSemester(sample) ?? '—',
         total_students: groupStudents.length,
         noc_count: groupNocs.length,
@@ -4085,9 +4093,8 @@ export async function getInternshipNocCountReport(tenantId: string, query: Repor
 export async function getInternshipNocListingReport(tenantId: string, query: ReportQuery = {}) {
   const scope = parseNewReportScope(query);
 
-  const [nocs, acceptedOffers] = await Promise.all([
-    prisma.nocRequest.findMany({
-      where: { tenant_id: tenantId },
+  const nocs = await prisma.nocRequest.findMany({
+      where: { tenant_id: tenantId, is_active: true },
       select: {
         noc_number: true,
         program: true,
@@ -4097,7 +4104,9 @@ export async function getInternshipNocListingReport(tenantId: string, query: Rep
         start_date: true,
         end_date: true,
         placement_source: true,
+        internship_type: true,
         certificate_url: true,
+        completion_certificate_url: true,
         offer_letter_url: true,
         contact_person_name: true,
         contact_person_phone: true,
@@ -4105,6 +4114,15 @@ export async function getInternshipNocListingReport(tenantId: string, query: Rep
         contact_person_designation: true,
         status: true,
         issued_at: true,
+        // University-drive NOCs leave contact_person_* empty — fall back to the linked company's recruiter.
+        company: {
+          select: {
+            recruiters: {
+              select: { name: true, phone: true, designation: true, email: true, verification_status: true },
+              orderBy: { created_at: 'asc' },
+            },
+          },
+        },
         student: {
           select: {
             id: true,
@@ -4112,7 +4130,7 @@ export async function getInternshipNocListingReport(tenantId: string, query: Rep
             full_name: true,
             institute: true,
             course: true,
-            department: true,
+            branch: true,
             batch: true,
             current_semester: true,
             mobile: true,
@@ -4123,15 +4141,7 @@ export async function getInternshipNocListingReport(tenantId: string, query: Rep
         },
       },
       orderBy: { created_at: 'desc' },
-    }),
-    prisma.offer.findMany({
-      where: { tenant_id: tenantId, status: 'accepted' },
-      select: { student_id: true },
-    }),
-  ]);
-
-  const placedStudentIds = new Set(acceptedOffers.map((offer) => offer.student_id));
-  const issuedNocStudentIds = new Set(nocs.filter((noc) => noc.status === 'issued').map((noc) => noc.student.id));
+    });
 
   const records = nocs
     .filter((noc) => {
@@ -4140,7 +4150,7 @@ export async function getInternshipNocListingReport(tenantId: string, query: Rep
         id: student.id,
         institute: student.institute,
         course: student.course,
-        department: student.department,
+        branch: student.branch ?? '—',
         batch: student.batch,
         current_semester: student.current_semester,
         academic_profile: student.academic_profile,
@@ -4150,7 +4160,9 @@ export async function getInternshipNocListingReport(tenantId: string, query: Rep
     })
     .map((noc) => {
       const student = noc.student;
-      const placementStatus = placedStudentIds.has(student.id) || issuedNocStudentIds.has(student.id) ? 'YES' : 'NO';
+      const recruiter = pickCompanyRecruiter(noc.company?.recruiters);
+      // "Internship + Placement" reflects the NOC form checkbox (any non-null internship_type = checked).
+      const placementStatus = noc.internship_type ? 'YES' : 'NO';
       return {
         noc_number: noc.noc_number ?? null,
         posting_type: noc.program ?? '',
@@ -4158,7 +4170,7 @@ export async function getInternshipNocListingReport(tenantId: string, query: Rep
         student_name: student.full_name,
         institute: student.institute ?? null,
         course: student.course ?? null,
-        branch: student.department,
+        branch: student.branch ?? '—',
         semester: resolveStudentSemester({ current_semester: student.current_semester, academic_profile: student.academic_profile }),
         contact: student.mobile ?? null,
         email: student.email,
@@ -4170,11 +4182,11 @@ export async function getInternshipNocListingReport(tenantId: string, query: Rep
         internship_type: noc.placement_source,
         noc_certificate_url: noc.certificate_url ?? null,
         offer_letter_url: noc.offer_letter_url ?? null,
-        completion_certificate_url: null,
-        recruiter_name: noc.contact_person_name ?? null,
-        recruiter_contact: noc.contact_person_phone ?? null,
-        recruiter_email: noc.contact_person_email ?? null,
-        recruiter_designation: noc.contact_person_designation ?? null,
+        completion_certificate_url: noc.completion_certificate_url ?? null,
+        recruiter_name: noc.contact_person_name || recruiter?.name || null,
+        recruiter_contact: noc.contact_person_phone || recruiter?.phone || null,
+        recruiter_email: noc.contact_person_email || recruiter?.email || null,
+        recruiter_designation: noc.contact_person_designation || recruiter?.designation || null,
         student_photo_url: student.profile_photo_url ?? null,
         internship_placement_status: placementStatus,
         noc_issued_date: noc.issued_at,
@@ -4305,16 +4317,6 @@ export async function getCompanyStageReport(tenantId: string, query: ReportQuery
 // ---- 5 & 6. No-Due reports (grouped by passing year(=batch) + institute/course/branch/semester) ----
 const NO_DUES_EXIT_REASONS = ['employment', 'family_business', 'planning_studies', 'higher_studies', 'competitive_exam'] as const;
 
-function noDuesGroupKey(student: NewReportStudent) {
-  return [
-    student.batch ?? '—',
-    student.institute ?? '—',
-    student.course ?? '—',
-    student.department ?? '—',
-    resolveStudentSemester(student) ?? '—',
-  ].join('||');
-}
-
 export async function getNoDuesCountReport(tenantId: string, query: ReportQuery = {}) {
   const scope = parseNewReportScope(query);
 
@@ -4325,24 +4327,38 @@ export async function getNoDuesCountReport(tenantId: string, query: ReportQuery 
         id: true,
         institute: true,
         course: true,
-        department: true,
+        branch: true,
         batch: true,
         current_semester: true,
+        pass_out_date: true,
         academic_profile: { select: { semester: true } },
       },
     }),
     prisma.noDuesRequest.findMany({
       where: { tenant_id: tenantId },
-      select: { student_id: true, exit_reason: true },
+      select: { student_id: true, exit_reason: true, sou_passing_year: true },
     }),
   ]);
 
   const scopedStudents = students.filter((student) => studentInReportScope(student, scope));
   const reasonByStudent = new Map<string, string>();
-  noDues.forEach((row) => reasonByStudent.set(row.student_id, row.exit_reason));
+  const passingYearByStudent = new Map<string, string>();
+  noDues.forEach((row) => {
+    reasonByStudent.set(row.student_id, row.exit_reason);
+    if (row.sou_passing_year) passingYearByStudent.set(row.student_id, row.sou_passing_year);
+  });
+  // Passing Year now comes from the No-Due form (sou_passing_year); students without a request fall back to batch.
+  const resolvePassingYear = (student: { id: string; batch: string | null }) =>
+    passingYearByStudent.get(student.id) ?? student.batch ?? '—';
 
   const rows: Array<Record<string, unknown>> = [];
-  groupBy(scopedStudents, noDuesGroupKey).forEach((groupStudents) => {
+  groupBy(scopedStudents, (student) => [
+    resolvePassingYear(student),
+    student.institute ?? '—',
+    student.course ?? '—',
+    student.branch ?? '—',
+    resolveStudentSemester(student) ?? '—',
+  ].join('||')).forEach((groupStudents) => {
     const sample = groupStudents[0];
     const groupReasons = groupStudents
       .map((student) => reasonByStudent.get(student.id))
@@ -4351,10 +4367,11 @@ export async function getNoDuesCountReport(tenantId: string, query: ReportQuery 
     const countReason = (reason: string) => groupReasons.filter((value) => value === reason).length;
 
     rows.push({
-      passing_year: sample.batch ?? '—',
+      passing_year: resolvePassingYear(sample),
+      pass_out_date: sample.pass_out_date ?? '—',
       institute: sample.institute ?? '—',
       course: sample.course ?? '—',
-      branch: sample.department ?? '—',
+      branch: sample.branch ?? '—',
       semester: resolveStudentSemester(sample) ?? '—',
       total_students: groupStudents.length,
       no_due_count: groupReasons.length,
@@ -4388,6 +4405,7 @@ export async function getNoDuesListingReport(tenantId: string, query: ReportQuer
       exit_reason: true,
       proof_url: true,
       created_at: true,
+      sou_passing_year: true,
       student: {
         select: {
           id: true,
@@ -4395,12 +4413,13 @@ export async function getNoDuesListingReport(tenantId: string, query: ReportQuer
           full_name: true,
           institute: true,
           course: true,
-          department: true,
+          branch: true,
           batch: true,
           current_semester: true,
           mobile: true,
           email: true,
           admission_year: true,
+          pass_out_date: true,
           profile_photo_url: true,
           academic_profile: { select: { semester: true } },
         },
@@ -4416,7 +4435,7 @@ export async function getNoDuesListingReport(tenantId: string, query: ReportQuer
         id: student.id,
         institute: student.institute,
         course: student.course,
-        department: student.department,
+        branch: student.branch ?? '—',
         batch: student.batch,
         current_semester: student.current_semester,
         academic_profile: student.academic_profile,
@@ -4426,12 +4445,13 @@ export async function getNoDuesListingReport(tenantId: string, query: ReportQuer
     .map((request) => {
       const student = request.student;
       return {
-        passing_year: student.batch ?? null,
+        passing_year: request.sou_passing_year ?? student.batch ?? null,
+        pass_out_date: student.pass_out_date ?? null,
         enrollment_number: student.enrollment_number,
         student_name: student.full_name,
         institute: student.institute ?? null,
         course: student.course ?? null,
-        branch: student.department,
+        branch: student.branch ?? '—',
         semester: resolveStudentSemester({ current_semester: student.current_semester, academic_profile: student.academic_profile }),
         contact: student.mobile ?? null,
         email: student.email,

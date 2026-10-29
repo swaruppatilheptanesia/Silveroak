@@ -4,6 +4,7 @@ import { env } from '../../config/env';
 import { logger } from '../../config/logger';
 import { NotFoundError, BusinessRuleError } from '../../shared/errors';
 import { buildStudentScopeConditions, buildDateRangeCondition } from '../../shared/utils/student-scope-filter';
+import { normalizeComparable } from '../../shared/utils/student-targeting';
 import { paginate, buildPrismaQuery } from '../../shared/utils/pagination';
 import { generateTemporaryPassword, hashPassword } from '../../shared/utils/password';
 import type {
@@ -707,7 +708,7 @@ export async function updatePermission(permissionId: string, tenantId: string, d
 // =========================================================
 
 export async function getStudents(tenantId: string, filters: QueryStudentsInput) {
-  const { page, limit, department, batch, verification_status, search, min_cgpa, max_cgpa, posting_type_master_id, sort_by, sort_order,
+  const { page, limit, batch, verification_status, search, min_cgpa, max_cgpa, posting_type_master_id, sort_by, sort_order,
     institute, course, branch, semester, academic_year, company_id, date_from, date_to } = filters;
 
   // Resolve the master's value so we can also match students who only registered
@@ -723,7 +724,6 @@ export async function getStudents(tenantId: string, filters: QueryStudentsInput)
   }
 
   const where = buildStudentWhere(tenantId, {
-    department,
     batch,
     verification_status,
     search,
@@ -1122,6 +1122,7 @@ export async function getPortfolios(tenantId: string, filters: QueryPortfoliosIn
 function selectionStudentFields(student: {
   institute: string | null;
   course: string | null;
+  branch: string | null;
   current_semester: string | null;
   gender: string | null;
   email: string;
@@ -1131,6 +1132,7 @@ function selectionStudentFields(student: {
   return {
     institute: student.institute,
     course: student.course,
+    branch: student.branch,
     semester: student.current_semester,
     gender: student.gender ? student.gender.toLowerCase() : null,
     email: student.email,
@@ -1160,6 +1162,7 @@ export async function getSelectionDatabase(tenantId: string, filters: QuerySelec
             full_name: true,
             enrollment_number: true,
             department: true,
+            branch: true,
             batch: true,
             institute: true,
             course: true,
@@ -1197,6 +1200,7 @@ export async function getSelectionDatabase(tenantId: string, filters: QuerySelec
             full_name: true,
             enrollment_number: true,
             department: true,
+            branch: true,
             batch: true,
             institute: true,
             course: true,
@@ -1361,12 +1365,13 @@ export async function getInterestRegistrations(tenantId: string, filters: QueryI
     ? { equals: filters.status }
     : undefined;
 
-  // FILTER COUNTER EXPORT — the date range filters the matching REGISTRATION's created_at.
+  // FILTER COUNTER EXPORT — the date range filters the matching REGISTRATION's registered_at
+  // (InterestRegistration has no created_at column; registered_at is its timestamp).
   const registrationDateRange = buildDateRangeCondition(filters.date_from, filters.date_to);
   const registrationSome: Prisma.InterestRegistrationWhereInput = {
     interest_type: interestTypeFilter,
     status: statusFilter,
-    ...(registrationDateRange ? { created_at: registrationDateRange } : {}),
+    ...(registrationDateRange ? { registered_at: registrationDateRange } : {}),
   };
 
   const conditions: Prisma.StudentWhereInput[] = [
@@ -1374,7 +1379,7 @@ export async function getInterestRegistrations(tenantId: string, filters: QueryI
     // Rejected students must not appear in the posting-type (interest) listing.
     { verification_status: { not: VerificationStatus.rejected } },
     { interest_registrations: { some: registrationSome } },
-    // Student-scope filters (institute/course/branch(=department)/semester/academic_year(=batch)).
+    // Student-scope filters (institute/course/branch/semester/academic_year(=batch)).
     ...buildStudentScopeConditions({
       institute: filters.institute,
       course: filters.course,
@@ -1383,10 +1388,6 @@ export async function getInterestRegistrations(tenantId: string, filters: QueryI
       academic_year: filters.academic_year,
     }),
   ];
-
-  if (filters.department) {
-    conditions.push({ department: filters.department });
-  }
 
   if (filters.search) {
     conditions.push({
@@ -1421,7 +1422,7 @@ export async function getRecentInterestRegistrations(tenantId: string, limit = 1
     orderBy: { registered_at: 'desc' },
     take: limit,
     include: {
-      student: { select: { full_name: true, enrollment_number: true, department: true } },
+      student: { select: { full_name: true, enrollment_number: true, department: true, branch: true } },
     },
   });
 
@@ -1430,6 +1431,7 @@ export async function getRecentInterestRegistrations(tenantId: string, limit = 1
     student_name: row.student.full_name,
     enrollment_number: row.student.enrollment_number,
     department: row.student.department,
+    branch: row.student.branch,
     interest_type: row.interest_type,
     status: row.status,
     registered_at: row.registered_at,
@@ -1522,6 +1524,16 @@ export async function withdrawInterestRegistration(
   return updated;
 }
 
+/**
+ * Hard-remove an interest registration — permanently deletes the row (unlike withdraw, which keeps a
+ * 'withdrawn' record for history). Tenant-scoped via loadInterestRegistrationForReview.
+ */
+export async function deleteInterestRegistration(id: string, tenantId: string) {
+  await loadInterestRegistrationForReview(id, tenantId);
+  await prisma.interestRegistration.delete({ where: { id } });
+  return { id };
+}
+
 // =========================================================
 // Helpers
 // =========================================================
@@ -1551,8 +1563,8 @@ function normalizeTextArray(values: string[] | undefined | null) {
 
 function getStudentOrderBy(sortBy?: string, sortOrder: 'asc' | 'desc' = 'asc'): Prisma.StudentOrderByWithRelationInput {
   switch (sortBy) {
-    case 'department':
-      return { department: sortOrder };
+    case 'branch':
+      return { branch: sortOrder };
     case 'batch':
       return { batch: sortOrder };
     case 'verification_status':
@@ -1570,13 +1582,12 @@ function getStudentOrderBy(sortBy?: string, sortOrder: 'asc' | 'desc' = 'asc'): 
 
 function buildStudentWhere(
   tenantId: string,
-  filters: Pick<QueryStudentsInput, 'department' | 'batch' | 'verification_status' | 'search' | 'min_cgpa' | 'max_cgpa' | 'posting_type_master_id'
+  filters: Pick<QueryStudentsInput, 'batch' | 'verification_status' | 'search' | 'min_cgpa' | 'max_cgpa' | 'posting_type_master_id'
     | 'institute' | 'course' | 'branch' | 'semester' | 'academic_year' | 'company_id' | 'date_from' | 'date_to'>
     & { posting_type_value?: string | null }
 ): Prisma.StudentWhereInput {
   const conditions: Prisma.StudentWhereInput[] = [{ tenant_id: tenantId }];
 
-  if (filters.department) conditions.push({ department: filters.department });
   if (filters.batch) conditions.push({ batch: filters.batch });
 
   // Shared scope filters (institute/course/branch/semester/academic_year → batch).
@@ -1678,6 +1689,7 @@ function mapAdminStudent(student: AdminStudentSource) {
     institute_name: student.institute,
     course_name: student.course,
     department: student.department,
+    branch: student.branch,
     batch_year: student.batch,
     date_of_birth: student.date_of_birth?.toISOString() ?? null,
     profile_photo_url: student.profile_photo_url,
@@ -1939,7 +1951,15 @@ function matchesEligibilityRule(student: RuleMatchingStudent, rule: EligibilityR
   const backlogCount = student.academic_profile?.backlog_count ?? 0;
 
   if (rule.is_active === false) return false;
-  if (rule.eligible_branches.length > 0 && !rule.eligible_branches.includes(student.department)) return false;
+  // Eligibility keys on the REAL ERP branch (rules are authored with the CRM branch picker), matched
+  // normalized (both come from the same ERP vocabulary). A student with no branch yet fails a
+  // branch-restricted rule until backfilled.
+  if (rule.eligible_branches.length > 0) {
+    const studentBranch = student.branch ? normalizeComparable(student.branch) : '';
+    if (!studentBranch || !rule.eligible_branches.some((b) => normalizeComparable(b) === studentBranch)) {
+      return false;
+    }
+  }
   if (rule.eligible_batches.length > 0 && !rule.eligible_batches.includes(student.batch)) return false;
   if (cgpa == null || cgpa < decimalToNumber(rule.min_cgpa)!) return false;
   if (backlogCount > rule.max_backlogs) return false;
@@ -1970,10 +1990,6 @@ function mapEligibilityRule(rule: EligibilityRule, eligibleStudentsCount: number
 
 function buildPortfolioMonitoringStudentWhere(tenantId: string, filters: QueryPortfoliosInput): Prisma.StudentWhereInput {
   const conditions: Prisma.StudentWhereInput[] = [{ tenant_id: tenantId }];
-
-  if (filters.department) {
-    conditions.push({ department: filters.department });
-  }
 
   conditions.push(...buildStudentScopeConditions({
     institute: filters.institute,
@@ -2021,6 +2037,7 @@ function mapPortfolioMonitoringStudent(student: PortfolioMonitoringStudent) {
     student_name: student.full_name,
     enrollment_number: student.enrollment_number,
     department: student.department,
+    branch: student.branch,
     batch: student.batch,
     status: portfolio?.status ?? 'draft',
     project_count: portfolio?.project_count ?? 0,
@@ -2048,6 +2065,7 @@ function applySelectionFilters(
     student_name: string;
     enrollment_number: string;
     department: string;
+    branch: string | null;
     batch: string;
     institute: string | null;
     course: string | null;
@@ -2070,13 +2088,12 @@ function applySelectionFilters(
   return records.filter((record) => {
     if (filters.type && record.type !== filters.type) return false;
     if (filters.posting_type && record.posting_type !== filters.posting_type) return false;
-    if (filters.department && record.department !== filters.department) return false;
     if (filters.batch && record.batch !== filters.batch) return false;
     if (filters.company && record.company_name !== filters.company) return false;
     if (filters.outcome && record.outcome !== filters.outcome) return false;
     if (!ciContains(record.institute, filters.institute)) return false;
     if (!ciContains(record.course, filters.course)) return false;
-    if (!ciContains(record.department, filters.branch)) return false;
+    if (!ciContains(record.branch, filters.branch)) return false;
     if (!ciEquals(record.semester, filters.semester)) return false;
     if (!ciContains(record.batch, filters.academic_year)) return false;
 

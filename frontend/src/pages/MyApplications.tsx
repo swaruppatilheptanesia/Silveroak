@@ -121,7 +121,14 @@ export default function MyApplications() {
   const applications = applicationsQuery.data ?? [];
   const offers = offersQuery.data ?? [];
   const joinedOffer = offers.find((offer) => offer.joining_status === 'joined');
-  const blockingOffer = offers.find((offer) => offer.applications_blocked);
+  // A non-rejected, non-overridden offer locks further applications/interest for ITS Posting Type only
+  // (other posting types stay open) — mirrors the backend per-type offer-block.
+  const blockingOffer = offers.find(
+    (offer) =>
+      offer.status !== 'rejected_by_student' &&
+      offer.status !== 'rejected_by_admin' &&
+      !offer.admin_override_enabled,
+  );
   const studentBlocked = Boolean(blockingOffer);
 
   async function handleAcceptOffer(offerId: string) {
@@ -248,11 +255,11 @@ export default function MyApplications() {
         {studentBlocked && (
           <Alert variant="destructive">
             <ShieldAlert className="h-4 w-4" />
-            <AlertTitle>Applications are locked</AlertTitle>
+            <AlertTitle>Applications are locked for this posting type</AlertTitle>
             <AlertDescription>
               {blockingOffer?.company?.name && blockingOffer?.role
-                ? `Your offer from ${blockingOffer.company.name} for ${blockingOffer.role} is on record. You can no longer apply to new postings or register interest in this cycle.`
-                : 'Your offer record locks further applications and interest registrations for this placement cycle.'}
+                ? `Your offer from ${blockingOffer.company.name} for ${blockingOffer.role} locks further applications and interest registrations for its posting type. Other posting types stay open.`
+                : 'Your offer locks further applications and interest registrations for its posting type. Other posting types stay open.'}
             </AlertDescription>
           </Alert>
         )}

@@ -46,6 +46,21 @@ export function formatDatePattern(
   }
 }
 
+/**
+ * Serialize a picked `Date` into a `yyyy-MM-dd` query param using LOCAL date parts.
+ * Use this for date-range filters instead of `Date.toISOString()`, which converts a
+ * local-midnight date to a UTC instant on the previous calendar day for +offset zones
+ * (e.g. IST), shifting/breaking the server-side date filter. Returns `undefined` for a
+ * missing/invalid date so it drops out of the querystring.
+ */
+export function toDateParam(dateValue: Date | null | undefined): string | undefined {
+  const date = coerceDate(dateValue);
+  if (!date) {
+    return undefined;
+  }
+  return formatDateFns(date, 'yyyy-MM-dd');
+}
+
 export function formatDate(
   dateString: string | Date | null | undefined,
   options: Intl.DateTimeFormatOptions = {

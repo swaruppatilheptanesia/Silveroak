@@ -68,6 +68,12 @@ export function NOCRequestCard({ request, onViewDetails }: NOCRequestCardProps) 
             <div className="flex items-center gap-2 flex-wrap">
               <h3 className="font-semibold text-foreground">{request.role_title}</h3>
               <Badge className={statusConfig.color}>{statusConfig.label}</Badge>
+              <Badge variant={request.is_active === false ? 'outline' : 'default'} className="text-xs">
+                {request.is_active === false ? 'Inactive' : 'Active'}
+              </Badge>
+              {request.is_reissue ? (
+                <Badge variant="secondary" className="text-xs">Re-Issued</Badge>
+              ) : null}
             </div>
             <div className="flex items-center gap-2 mt-1">
               <Building2 className="h-4 w-4 text-muted-foreground" />

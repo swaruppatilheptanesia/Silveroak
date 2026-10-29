@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { paginationSchema, sortSchema } from '../../shared/schemas/common';
+import { paginationSchema, searchSchema, sortSchema } from '../../shared/schemas/common';
 
 export const createAnnouncementSchema = z.object({
   title: z.string().min(1).max(200),
@@ -41,7 +41,7 @@ export const queryAudienceSemestersSchema = z.object({
   branches: commaSeparatedList,
 });
 
-export const queryAnnouncementsSchema = paginationSchema.merge(sortSchema).extend({
+export const queryAnnouncementsSchema = paginationSchema.merge(sortSchema).merge(searchSchema).extend({
   status: z.enum(['draft', 'published', 'archived']).optional(),
   priority: z.enum(['high', 'medium', 'low']).optional(),
   // FILTER COUNTER EXPORT — target-scope (institute/course/branch arrays) + date range (created_at)

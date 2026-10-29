@@ -273,14 +273,26 @@ flag the conflict before changing code.
 
 - **Offer flow:** `createOffer` writes `status: 'pending_student_action'`,
   `applications_blocked: true`. Students explicitly Accept / Reject from
-  Dashboard or My Applications. **The block is permanent** — any offer
-  ever on record (any status, including rejected) blocks future applies
-  and interest registrations across BOTH job and internship postings.
-  Enforced by `assertNoExistingOffer(studentId)` in
-  `src/shared/utils/offer-block.ts`.
+  Dashboard or My Applications. **The offer block is PER-POSTING-TYPE and
+  override-aware** (changed 2026-09-21 — it was previously global +
+  permanent + override-blind): a non-rejected offer (`pending_student_action`
+  / `accepted`) locks apply + register-interest **only for that offer's
+  Posting Type**; other Posting Types stay open; **rejected** offers no
+  longer block; and an offer whose `admin_override_enabled` is true (admin
+  set compliance = "Override Enabled") stops blocking. Enforced by
+  `assertNoBlockingOfferForType(studentId, postingTypeMasterId)` /
+  `getBlockingOfferProgramValues(studentId)` in
+  `backend/src/shared/utils/offer-block.ts` (matches offer →
+  `posting.posting_type_master.value`, mirrors `self-placed-noc-block.ts`).
+  Wired into `application.service.apply()` (after the posting load, with the
+  other per-type guards) and `student.service.registerInterests()` (per
+  requested type). The old global `assertNoExistingOffer` was removed. See
+  the offer-block finding below. [[working-preferences]]
 - **CGPA: NULL ≡ 0.** `formatCGPA` defaults to `'0.00'` when null. New
-  student records seed `cgpa: 0` (auth.service:`buildAcademicSeed`).
-  Backfill for legacy NULL rows is `scripts/backfill-cgpa-zero.ts`.
+  student records seed `academic_profile.cgpa` from the CRM — `crmCgpa()` = CRM
+  `cgpa`, else `cpi`, else 0 (auth.service:`buildAcademicSeed`). Backfill for legacy
+  NULL rows is `scripts/backfill-cgpa-zero.ts`; re-sync from CRM with
+  `scripts/backfill-student-cgpa-from-crm.ts` (see the CRM score-rename finding).
 - **NOC reference format:** `SOU/TPO/MM-YYYY/XXX/NNNN` where `XXX` is
   the first 3 letters of the posting type, uppercase. Sequence is
   per-tenant per-month. `buildNocReferenceNumber` +
@@ -408,7 +420,8 @@ flag the conflict before changing code.
   (auto-verifies + auto-creates user with temp password).
 - `shared/utils/password.ts` — `hashPassword`, `comparePassword`,
   `generateTemporaryPassword(length)` using `crypto.randomBytes`.
-- `shared/utils/offer-block.ts` — `assertNoExistingOffer(studentId)`.
+- `shared/utils/offer-block.ts` — `assertNoBlockingOfferForType(studentId, postingTypeMasterId)` +
+  `getBlockingOfferProgramValues(studentId)` (per-Posting-Type, override-aware; see the Offer flow convention).
 - `modules/noc/noc-certificate.renderer.ts` —
   `buildNocReferenceNumber`, `buildPostingTypeShortCode`.
 
@@ -423,9 +436,10 @@ flag the conflict before changing code.
 - `seed-dummy-offers.ts` — create tagged dummy Offer rows for
   exercising the Offer Records list/pagination (dry-run by default;
   `--apply`, `--count=N`, and `--remove --apply` to undo). Only
-  targets students with **no** existing offer, because any offer row
-  **permanently blocks that student from applying** (`assertNoExistingOffer`)
-  until the dummies are removed.
+  targets students with **no** existing offer, because a non-rejected,
+  non-overridden offer row **blocks that student from applying to the same
+  Posting Type** (`assertNoBlockingOfferForType`) until the dummies are
+  removed (offer block is per-Posting-Type since 2026-09-21).
 
 ---
 
@@ -1029,6 +1043,30 @@ flag the conflict before changing code.
   contact person" as empty must also treat `'—'` as empty (`hasValue()` in the preview does).
   Certificates re-render from the stored snapshot, but **issued PDF files are never regenerated**, so a
   historical NOC's screen view and its stored PDF can legitimately differ.
+  **(Formatting pass, 2026-08-26 — both renderers touched, still mirrored.)** (a) Student-detail rows
+  (Enrollment No.→Duration) now render **fully bold** (PDF value token `style:{bold:true}`; preview row
+  `font-semibold`). (b) **Editor blank lines now survive into the PDF**: the HTML parser dropped empty
+  `<p></p>`/`<p><br></p>` blocks — new `pushBlockOrSpacer()` emits a `'spacer'` `TextBlockType` for an
+  empty block element, and the body loop advances one line (`fontSize*1.42`) per spacer, drawing nothing.
+  (c) `NOC_SIGNATURE_EMAIL_Y` 120→**136** (title=148) removes the Director→Email gap; the unused
+  `NOC_SIGNATURE_MOBILE_Y` was deleted. (d) **Footer centering now uses real Adobe Core-14 Helvetica /
+  Helvetica-Bold AFM width tables** (`HELVETICA_WIDTHS`/`HELVETICA_BOLD_WIDTHS`, 1000-em, indexed by
+  `charCode-32`, heuristic fallback for non-ASCII) — `measureCharacterWidth` was an approximation that
+  left every centered line (title, `Sub:`, footer) a few points off; this also tightens `wrapBlock`
+  word-wrap. Footer address spelling fixed "Vidhyapith"→"Vidyapith" in both files.
+  **(Overlap fix, 2026-09-21 — PDF renderer only.)** The old warning here ("student block pinned y=300 …
+  don't let long bodies overrun y=300") had materialized: a long template body (e.g. one with a duplicated
+  paragraph) flowed past y=300 and drew the body text ON TOP of the student-detail rows + the signature
+  block. The preview never showed it because it's CSS flex-flow. Fixed by FLOWING the lower blocks from the
+  actual body end instead of pinning them: `studentBlockTop = Math.min(300, currentY - 10)` and
+  `withRegardsY = Math.max(168, Math.min(198, studentBlockBottom - 18))` (signature stamp/name/title/email
+  kept as fixed offsets −44/−52/−66/−78 from `withRegardsY`; footer stays pinned at the page bottom; the 168
+  floor keeps the signature off the footer). `Math.min` means **short/normal bodies keep the exact old fixed
+  layout (zero regression)** — only long bodies flow down. The `NOC_SIGNATURE_STAMP_Y/NAME_Y/TITLE_Y/EMAIL_Y`
+  module consts were removed (now relative locals); `NOC_SIGNATURE_WITH_REGARDS_Y=198` stays as the short-body
+  seed. ⚠ Still single-page (`/Count 1`): a body long enough that even the flowed signature can't clear the
+  168 floor is genuine overflow that needs pagination (not built). Issued PDFs are never regenerated, so this
+  affects NOCs issued after deploy only. Preview unchanged.
 - **⚠ KNOWN, UNFIXED: NOC template placeholder vocabularies diverge between the PDF and the
   snapshot/preview.** (Recorded 2026-07-21 — deliberately left alone, don't re-diagnose.) The PDF token
   map (`generateNocCertificatePdf.replacements`) understands **`start_date`/`end_date`** but **not**
@@ -1286,9 +1324,26 @@ flag the conflict before changing code.
   red **Withdrawn** badge + message **"You have been withdrawn from this Posting Type by TPO Admin on [Date] by
   [Admin Name]."** and a disabled Register button (server-side backstop = the `INTEREST_WITHDRAWN` throw).
   **Preserved:** visibility = pending∪approved + apply-gate = approved (`posting-type-interest.ts` untouched), the
-  approve/withdraw endpoints + `interest_lists:approve`. **OUT OF SCOPE (user-deferred):** events/drives gating for a
-  withdrawn posting type — events are `EventStudent`-assignment gated only, so a withdrawn student still sees assigned
-  events; a separate follow-up. [[working-preferences]]
+  approve/withdraw endpoints + `interest_lists:approve`. **~~OUT OF SCOPE (user-deferred): events/drives gating~~ —
+  DONE 2026-09-21 (see the events/drives finding below).** [[working-preferences]]
+- **A withdrawn student is also hidden from EVENTS/DRIVES under the withdrawn Posting Type (completes the
+  interest-withdrawal lock).** (Added 2026-09-21, backend-only, NO migration.) Previously the student event feed was
+  gated ONLY by `EventStudent` assignment (`applyVisibilityScope` student branch in
+  [event.service.ts](backend/src/modules/events/event.service.ts)), so a student assigned to a drive before being
+  withdrawn kept seeing it. Students have **no** event actions (view-only; attendance is admin/faculty), so the fix
+  is a pure **visibility filter**. New `getWithdrawnInterestValues(studentId)` (status `withdrawn`, normalized
+  values) in [posting-type-interest.ts](backend/src/shared/utils/posting-type-interest.ts); new
+  `resolveWithdrawnPostingTypeMasterIds(tenantId, studentId)` (values → posting-type master ids, mirrors
+  `resolveFacultyEligiblePostingTypeMasterIds`) + `applyWithdrawnEventExclusion` adding
+  `where.NOT = { posting: { is: { posting_type_master_id: { in: withdrawnIds } } } }`, wired into **`getEvents`** and
+  **`getEventById`** for role `student` (covers `GET /events/my`, `/events/my/:id`, and generic `/events`). Events
+  with **no linked posting stay visible** (not "related to" any type — the `NOT` inner clause doesn't match them);
+  reinstatement (admin re-approve → `approved`) auto-restores visibility since the filter reads the current withdrawn
+  set each request. Uses the single legacy `posting` (= `posting_ids[0]`), same as the faculty gate — a rare
+  multi-posting event is keyed on its primary posting type. **Assignment-time exclusion was deliberately NOT added**
+  (assignment is add-only + harmless once the view is filtered; reinstatement keeps the existing assignment). Verified
+  on the dev DB (excluding a posting type removes exactly its assigned events, keeps the rest + null-posting events).
+  BE tsc 0. [[working-preferences]]
 - **Forms scroll/focus the first validation error on submit — via `aria-invalid`, not RHF refs.** (Added
   2026-08-04.) There was no scroll/focus-to-error anywhere; RHF's default `shouldFocusError` silently
   no-ops on Select/custom controls because shadcn `FormControl` never forwards `field.ref`. Fix keys off
@@ -1684,7 +1739,508 @@ flag the conflict before changing code.
   Specific Information" card renders all reasons incl. the previously-missing planning/exam branches; its
   admin **edit form** doesn't send the new fields, but Prisma ignores `undefined` so they're preserved (not
   wiped). No enum change. [[working-preferences]]
-- File size watch: this `CLAUDE.md` is **~760 lines — WELL past the ~300 split threshold** (Set Instruction 7).
+- **Pagination rollout is phased; page size is 20/screen, backend hard-caps `limit` at 100.** (Phases 1–3,
+  latest 2026-08-26.) Shared FE pieces: `src/lib/pagination.ts` `normalizePagination` (fixes the snake→camel
+  `total_pages`/`has_next` dead-pager bug — services that cast raw pagination must run through it) and
+  `src/components/shared/ListPager.tsx` (`page`/`totalPages`/`onPageChange`; renders nothing when
+  `totalPages<=1`). **Convention to add a pager to a routed list screen:** `const [page,setPage]=useState(1)`;
+  change the list query `limit:100/1000` → `page, limit:20`; keep count/stat (`limit:1`) + export
+  (`limit:100/1000`) queries untouched; `useEffect(()=>setPage(1),[<search+filter deps>])` (+ `useServerSort`
+  `onChange:()=>setPage(1)`); render `<ListPager .../>` under the list. **Done so far:** Phase 2 = EmployerDirectory,
+  PostingsManagement, VerificationTab; Phase 3 = AnnouncementManagement, PolicyRepository, StudentAnnouncements;
+  Phase 4 = FacultyDrives, RecruiterDrives, FacultyNOCApprovals, CircularsManagement; Phase 5 (final list) =
+  Opportunities.
+  **Phase 3 also added a backend `search` param** to the announcements + policies list endpoints (they had none):
+  `queryAnnouncementsSchema`/`queryPoliciesSchema` `.merge(searchSchema)`; `getAnnouncements` sets `where.OR` on
+  title/content in **all three** role branches, `buildPolicyWhere` on title/description — mirrors the postings
+  `search` (`posting.service.ts`). Server search is title+content / title+description only (client versions also
+  matched author/audience/category — intentional narrowing).
+  **Phase 4 = the tab screens + the unbounded Circulars list.** Pattern for a tab screen: each tab is its OWN
+  paginated query (its `pagination.total` feeds the tab badge — do NOT count a shared fetched set). Backend gained
+  a **CSV `statuses` param** on `queryEventsSchema` + `queryNocSchema` (enum-checked comma-split transform →
+  `where.status = { in: [...] }`) so a tab sends its exact status set (FacultyDrives Past = `[completed]`,
+  RecruiterDrives Past = `[completed,cancelled]`; Faculty NOC Reviewed = the 5 non-`pending_faculty` statuses),
+  plus `searchSchema` (events search = title/venue/company; noc search = scalar cols + `student`/`company`
+  relations inside `where.OR`, which does NOT collide with the top-level `where.student` scope). Faculty NOC stat
+  cards read a **new `GET /noc/summary`** (`getFacultyNocSummary`) — a page of rows can't do the rejected-by-dept
+  vs rejected-by-tpo split (needs `faculty_approved_at`); its CSV export loops all pages. Circulars: the flat
+  `getGeneratedCirculars` is shared by the Announcement "start from circular" picker + FacultyCirculars +
+  `/generated/my` (all need the FULL list), so a **parallel** `GET /circulars/generated/paginated`
+  (`getGeneratedCircularsPaginated` + `queryGeneratedCircularsSchema`, mirrors `getTemplates`) was added and only
+  CircularsManagement wired to it (`useGeneratedCircularsPaged`); its sort moved client→server (`useServerSort`,
+  dropped `title`/`id` — derived, not server-sortable) and search covers company/role/type only.
+  **Phase 5 (final list screen) = Opportunities — CLIENT-side (display) pagination, NOT server-side.** This is
+  a faceted discovery UI: 6/7 filters (work mode/locations/domains/stipend/ctc/type-by-value), eligibility
+  (`evaluatePostingForStudent`), the Eligible/All counts, the 4 stat cards, and "Recommended" are ALL computed
+  client-side over the full loaded set, and the backend can't reproduce eligibility or those facets — so the
+  fetch stays a single bounded `usePostings({limit:100})` (the backend already scopes a student to
+  registered-interest posting types, so it's small + fast) and only the *rendering* is paged: `PAGE_SIZE=12`,
+  per-tab page state, `slice((page-1)*SIZE, page*SIZE)` per tab, `ListPager` with locally-computed totalPages,
+  reset-to-1 on `filteredPostings` change. Tab badges + stat cards + Recommended stay on the full filtered set.
+  Don't "upgrade" this to server-side pagination — it would gut the discovery UX. **Rollout COMPLETE for all
+  list screens.** Only broader no-pagination backends remain if ever needed (masters, portfolios, selection-db,
+  interest-lists, per-user "my" lists, recruiter-portal). Reports stay excluded. All phases FE-heavy (Phases 3–4
+  added backend `search`/`statuses` params + two read endpoints), **no migration**. [[working-preferences]]
+- **Posting-type targeting is a cascading Institute→Course→Branch→Semester ROW model via `MasterOption.scope_rows`
+  (was four independent flat arrays ANDed as a cross-product).** (Added 2026-08-26. ⚠ additive migration
+  `MasterOption.scope_rows Json @default("[]")`.) The old four multi-selects (`target_institutes/courses/branches/
+  semesters`) ANDed together, so you couldn't express "SOCET/B.Tech/CE/7" **separately** from "SOM/MBA/—/4".
+  Now the admin edits a **row table** (invoice-style): each row is one complete **{institute, course, branch,
+  semesters[]}** combination and a student matching **ANY** row is eligible (**OR of rows**; all four cells
+  required per row). **The flat `target_*` arrays are KEPT** as a legacy fallback **and auto-derived as the
+  UNION of the rows on save** (`deriveFlatTargetsFromRows` in `masters.service`) so flat-array consumers
+  (`facultyMatchesPostingTypeMaster` "My Programs", event pipeline inheritance) keep working. **Matcher:** new
+  `matchesScopeRows(rows, student, {branchFallback})` in `shared/utils/student-targeting.ts` — used when
+  `scope_rows` present in **both** `matchesStudentTargeting` (`branchFallback:false`, strict) and
+  `matchesStudentTargetingForMaster` (`branchFallback:true`, since students carry no real branch —
+  `Student.department` is course-derived, so a row's branch is satisfied by matching its parent course); else
+  the existing flat-array AND. `StudentTargetValues.scope_rows` is typed `unknown` (callers pass the raw
+  MasterOption row whose Json is `JsonValue`); `parseScopeRows` coerces defensively. **Postings carry no
+  `scope_rows` column**, so `matchesStudentTargeting` on a Posting always hits the flat fallback (unchanged).
+  **`updateMaster` only overwrites the flat arrays when `scope_rows` is non-empty** — a rename (empty rows) must
+  not wipe a legacy type's flat targeting. BE: `masters.schema` (`scopeRowSchema` on create/update + `.refine`),
+  `masters.service` (`parseScopeRows`/`normalizeScopeRows`/`deriveFlatTargetsFromRows`; `mapMasterOption` emits
+  `scope_rows` **posting_type only**; create/update write it), `report.analytics.service` selects
+  `scope_rows: true` on its two posting-type-master queries. FE: new `components/admin/ScopeRowTable.tsx`
+  (bordered table + green "+" header add-button; each row is a **`ScopeRowEditor` child** that owns its OWN
+  course/branch cascade `useQuery`s via `policyService.getCourseOptions/getBranchOptions` — hooks can't run in a
+  `.map`; single-select Institute→Course→Branch + Semester `SearchableMultiSelect` + red `Trash2` delete) and
+  `components/admin/PostingTypeScopeEditor.tsx` (wraps the table + a **separate** Academic Years multi-select).
+  `MasterDataManagement` uses `PostingTypeScopeEditor` in **both** create + edit (replacing `UserScopeSelector` +
+  the now-**deleted** `SemesterScopeTable`), blocks save on a partial row, and renders per-row scope in the
+  list-row summary (falls back to the flat-array summary for legacy rows). `UserScopeSelector` is left intact
+  (commented-out posting-form/policy usages) but **no longer used by Master Data**. **Scope: Posting Types
+  only** — announcements' parallel semester logic is deliberately untouched. Academic Years stays admin-only
+  (already excluded from student matching). BE tsc 0, FE tsc 87 (baseline). **User runs `npx prisma migrate
+  dev`.** (Supersedes an earlier same-day per-course `semester_rules` attempt — that column/code was replaced by
+  `scope_rows`, still one migration.) [[working-preferences]]
+- **NOC Re-Issued Request — versioned NOC records sharing one `noc_number`, with an Active/Inactive lifecycle;
+  reports are Active-only.** (Added 2026-08-27. ⚠ MIGRATION.) A student who changes companies re-issues an
+  existing NOC. `NocRequest` gained `is_active Boolean @default(true)`, `is_reissue Boolean @default(false)`,
+  `previous_noc_id` (self-relation `NocReissue`), `reason_for_company_change`, `termination_letter_url/name`, and
+  **`noc_number` DROPPED its `@unique`** (re-issues share the number). ⚠ Because of that drop, the issue-time
+  sequence in `generateNocCertificateArtifact` no longer relies on `@unique`/P2002: a **re-issue keeps its
+  inherited `noc_number`** (branch on `noc.noc_number` present), and a **new** NOC counts **DISTINCT** month
+  `noc_number`s + a `while (exists) sequence++` collision loop. **Create** (`noc.service.createNoc`): when
+  `is_reissue`, validate `previous_noc_id` is the student's own **issued** NOC (`INVALID_REISSUE_TARGET`), enforce
+  **max 4 re-issues per number** (`NOC_REISSUE_LIMIT`=4, `NOC_REISSUE_LIMIT_REACHED`), **bypass the
+  `NOC_ALREADY_ISSUED` guard**, then in a `$transaction` `updateMany` the whole `noc_number` group to
+  `is_active:false` and create the new row with the shared `noc_number` + `is_active:true`. **Active flips on
+  SUBMIT** (even while pending). **`rejectNoc`**: rejecting an active re-issue sets it inactive and **reverts the
+  most-recent non-rejected sibling** in the group to Active (student never loses a valid NOC). **Reads**
+  (`getMyNocs`/`getNocs`/`getNocById`) `include: { previous_noc: { select: { noc_number } } }` and return ALL
+  versions (lists are NOT filtered — they show an Active/Inactive column). **Reports Active-only**: `is_active:true`
+  added to all 8 NocRequest report queries in `report.analytics.service.ts` (5 dedicated: pending/issued-register/
+  by-dept/internship-noc-count/internship-noc-listing + 3 placement NOC sub-queries) → listing + counters + export
+  all follow. New PDF-only `POST /noc/termination-letter` (`nocTerminationLetterUpload` multer +
+  `ctrl.uploadTerminationLetter`, upload-first pattern). FE: wizard (`NOCRequestWizard.tsx`) Step-1 "Request for
+  Re-Issued NOC" `Checkbox` → previous-NOC `SearchableSelect` (from `useMyNocs()` filtered to
+  `status==='issued' && noc_number && is_active!==false`) + reason `Textarea` + termination `File` input;
+  `validateNocForm` requires them when checked **and bypasses the "program already issued" block** for re-issues;
+  payload adds `is_reissue/previous_noc_id/reason_for_company_change/termination_letter_url+name`. Active/Inactive
+  + Re-Issued badges + re-issue details + termination link added to `NOCRequestCard`, `NOCRequestDetailSheet`,
+  `NOCReviewDialog`, and the two **inline** `NocTable`s (`AdminNOCManagement`, `FacultyNOCApprovals` — the latter's
+  CSV/Excel export too). ⚠ **Consequence of flip-on-submit:** a pending re-issue is Active while the prior issued
+  NOC goes Inactive → the group drops out of the Issued register/reports until the re-issue is itself issued
+  (reappears if rejected). BE tsc 0, FE tsc 87. **User runs `npx prisma migrate dev --name noc_reissue`.**
+  [[working-preferences]] [[noc-flow]]
+- **ERP now has a REAL per-student branch (`Student.branch` from CRM `branchName`); targeting/eligibility/faculty
+  scope key on it — `Student.department` is no longer the branch stand-in (Phase 1-2 of the "drop department" work).**
+  (Added 2026-08-27. ⚠ MIGRATION — `Student.branch String? @db.VarChar(200)` + `@@index([tenant_id, branch])`.) The
+  ERP `GetStudentDetailByEnrollmentNo` gained a `branchName` field whose value **exactly matches the CRM
+  `GetBranchList.BranchName` labels** the scope picker / `scope_rows` branch cell / all Source-A dropdowns
+  (`/policies/audience/*`) already use — so institute→course→**branch**→semester finally narrows by a genuine branch
+  (verified on the Chemical-Engineering cohort `200203021001…`). **Data:** `CrmStudentDetail.branchName` +
+  `deriveBranch()` (returns **null** when ERP has none — deliberately no course fallback) written at signup
+  (`auth.service.ts`); backfill existing rows with `scripts/backfill-student-branch.ts` (dry-run default, `--apply`).
+  **Matcher (`shared/utils/student-targeting.ts`): branch is NULL-GATED** — `branchDimensionMatches` enforces the
+  target branch strictly when the student HAS a branch, else passes (institute/course/semester still gate) so
+  un-backfilled students never disappear (the "fall back to course" transitional rule). `matchesScopeRows` lost its
+  `branchFallback` param and `matchesStudentTargetingForMaster` now just delegates to `matchesStudentTargeting` (the
+  old always-course-fallback is gone). **CRITICAL: never put `student.department` (courseShortName) back into a
+  `StudentTargetContext.branch` slot** — under the now-strict matcher a courseShortName never matches a scope-row's
+  full branch name and would EMPTY the cohort. All context builders feed `student.branch` (posting/application/
+  masters/policy services + the report cohort-matcher builders in `report.analytics.service.ts`, `branch:true` added
+  to their selects). `student-scope-filter.ts` `branch` filter → `Student.branch` (un-backfilled students won't
+  appear under a branch filter until backfilled). Faculty scope (`studentMatchesFacultyScope`) matches branch OR
+  course OR department (still tolerant). Announcement scope + eligibility (`admin.service.matchesEligibilityRule`,
+  normalized on `student.branch`) repointed; the FE **`EligibilityRulesTab` "Eligible Branches" selector is now a
+  CRM Institute→Course→Branch cascade** (legacy master-branch rules match nobody until re-authored — chosen).
+  **DEFERRED (later passes, NOT done): report DISPLAY "Department" groupings/columns/CSV (~35 sites); the FE
+  "Department" filter selects + label renames (StudentListTab/PortfolioMonitoringTab/SelectionDatabaseTab/
+  InterestLists/InternshipsManagement); dropping the `branch` MasterCategory + its seeding; physically dropping
+  `Student.department`/`User.department` (KEPT, still written from course).** The two NOC certificate "Branch"
+  placeholders (`noc.service` snapshot + `noc-certificate.renderer`) still render `department` — they're DISPLAY,
+  not matcher inputs, so left alone. BE tsc 0, FE tsc 87 (baseline). **User runs `npx prisma migrate dev --name
+  student_branch`, restarts BE, then `npx tsx scripts/backfill-student-branch.ts --apply`.**
+  [[erp-no-per-student-branch]] [[branch-level-targeting-followup]] [[working-preferences]]
+- **Drop-department Phase 3 (REPORTS) is done — every report groups/filters/displays the real ERP `branch`.**
+  (Added 2026-08-27, extends the Phase 1-2 branch finding above. FE-heavy + backend report edits, NO migration.)
+  `report.analytics.service.ts`: the 3 helpers (`studentMatchesSelection`, `studentInReportScope`,
+  `groupKeyForStudent`), the 3 base mappers (`mapStudentBase`/`mapOfferBase`/`mapInternshipBase`), ~25 per-report
+  emit lines, and every report student `select` now use **`student.branch`** (`?? '—'`); every report filter param
+  is **`branch`** (matched vs `Student.branch`) — the `department` param is gone. The 8 breakdown reports re-key on
+  branch and renamed response fields (`departments`→`branches`, `department`→`branch`, `department_breakdown`→
+  `branch_breakdown`, `stats.departments`→`stats.branches`; unplaced dropped its `dept_breakdown` alias). Internship
+  report filters now match `student.branch` (was `Internship.department` — that column is a SEPARATE entity field,
+  still kept). `report.service.ts` `getDepartmentWiseStats` groups by `branch`. FE: every report's Branch filter is a
+  **plain single-select "All Branches" dropdown, options derived from the result rows**
+  (`Array.from(new Set(rows.map(r => r.branch).filter(Boolean))).sort() as string[]`) — same derive-from-rows
+  pattern as the Institute/Course/Semester dropdowns beside it; rows carry the real ERP branch so the list shows
+  real CRM branch names. (⚠ An earlier Source-A Institute→Course→Branch cascade popover `ReportBranchFilter` +
+  `ReportScopeFilters.branchCascade` was built then **REMOVED 2026-08-27** as redundant — the reports already show
+  separate Institute/Course dropdowns; don't reintroduce it.) All ~24 report components + the inline
+  `ReportsAnalytics` reports relabel "Department"→"Branch" and read `row.branch`. **⚠ Report queries now select/filter `Student.branch`, so the Phase 1-2
+  `student_branch` migration + backfill MUST be applied or reports 500 at runtime.** BE tsc 0, FE tsc **68** (was
+  87 — department-derived baseline errors removed). **STILL DEFERRED (Phase 4-5): non-report "Department"
+  filters/labels, the `branch` MasterCategory, and physically dropping `Student.department`/`User.department`.**
+  `AnnouncementHistoryReport`'s `department` grouping option is an announcement AUDIENCE-TYPE value, not student
+  branch — intentionally left. [[branch-level-targeting-followup]] [[working-preferences]]
+- **Drop-department Phase 4 (Tier 1) — non-report admin Student Management surfaces now filter/show the real ERP
+  `Student.branch`.** (Added 2026-08-27. NO migration; the Phase 1-2 `student_branch` migration + backfill are the
+  runtime precondition.) Scope = the TPO-admin **Students** page `StudentHub.tsx` tabs (All=`StudentListTab`,
+  `VerificationTab`, `PortfolioMonitoringTab`, Selections=`SelectionDatabaseTab`) + `InterestLists` +
+  `InternshipsManagement` + `NoDuesManagement`. ⚠ **Key discovery:** the four tabs + InterestLists **already
+  rendered `AdminListScopeFilters`** (the ERP Institute→Course→Branch cascade, sending a real `branch` param), so
+  their old "Department" `<Select>` was a **redundant duplicate** (fed by the `branch` MasterCategory / row values,
+  sent as a separate `department` param → `Student.department`). Fix = **remove the redundant control** + **relabel
+  the "Department" column/detail → "Branch" reading `row.branch`**. `InternshipsManagement` had NO cascade → added
+  `AdminListScopeFilters` and gave the internship list backend `branch`/`institute`/`course`/`semester`/
+  `academic_year` scope params (`buildStudentRelationFilter` now uses `buildStudentScopeConditions`; the faculty
+  branch keeps its pre-existing exact `scope.department` — a Tier-2 follow-up). **Backend:** the admin list mappers
+  (`mapAdminStudent`, portfolio/selection/interest mappers, `selectionStudentFields`, `getRecentInterestRegistrations`,
+  no-dues `studentSelection`) now **emit `branch`** (Student scalar); the `department` filter clause was deleted from
+  `getStudents`/`getPortfolios`/`getInterestRegistrations`/`getSelectionDatabase`/internship list and the `department`
+  query param **removed from the four admin Zod query schemas + `queryInternshipsSchema`**; `getStudentOrderBy`'s
+  sort key `department`→`branch`; `applySelectionFilters` matches `branch` vs `record.branch` (was
+  `record.department`). **FE types:** added `branch` to `ApiAdminStudent`/`ApiAdminPortfolioRecord`/
+  `ApiAdminSelectionRecord`/`ApiRecentInterestRegistration`/`ApiInternshipStudentSummary`/`ApiNoDuesStudentSummary`/
+  `NoDuesRequest`; removed the `department` list-filter key from those `*QueryParams`; sort unions `department`→
+  `branch`. `normalizeNoDuesRequest` copies `branch`; new `getInternshipBranch` helper (prefers `student.branch`,
+  falls back to department) used by the admin internship student cell. Deleted the now-unused
+  `useAdminDepartmentOptions` hook. **Dead-twin pages `StudentManagement.tsx` + `StudentVerification.tsx` DELETED**
+  (unrouted; the live page is `StudentHub`). ⚠ `Student.department`/`User.department` columns are **still written**
+  (physical drop = deferred Phase 5). BE tsc 0, FE tsc **67** (was 68 — also fixed a baseline `posting_type_master_id`
+  gap in `InternshipQueryParams`). **STILL DEFERRED — Tier 2 (next phase):** student "Department" shown on
+  non-admin-student screens (student `Profile.tsx`; recruiter `RecruitmentPipeline`/`CandidateDetailSheet`; faculty
+  `DepartmentStudents`; event tables `EventDetailDialog`/`EventAttendanceDialog`/`EventAssignmentDialog`; internship
+  cells in `FacultyInternships`/`RecruiterInternships` via `getInternshipDepartment`; `applicationExport.ts`,
+  `ExportCandidatesDialog`; NOC list cards via `getNocDepartment`) — each needs a real `branch` added to that
+  screen's offer/application/internship/event/noc/portfolio/student-profile payload. **Tier 3 (out of scope
+  entirely):** staff/CRM department (`UserManagementTab`, `MyProfile` `user.department`), announcement audience-type
+  `'department'`, the Internship entity's own `department` field, certificate displays, faculty nav branding.
+  Phase 5 = retire the `branch` MasterCategory + physically drop `Student.department`/`User.department`.
+  [[branch-level-targeting-followup]] [[erp-no-per-student-branch]] [[working-preferences]]
+- **Drop-department Phase 4 (Tier 2) — the remaining non-admin student screens now display real
+  `Student.branch`.** (Added 2026-08-28. NO migration; Phase 1-2 `student_branch` migration + backfill are the
+  runtime precondition.) Pattern (mirror of Tier 1): add `branch: true` to the screen's student `select` (or
+  `branch: student.branch` to the mapper — spread mappers auto-flow), add `branch` to the FE student sub-object
+  type, then render `branch ?? department` (the fallback keeps un-backfilled students non-blank). **Backend selects
+  touched:** `application.service.ts` list (~L244) + detail (~L303) student selects; `recruiter-portal.service.ts`
+  `getPostingApplications` (~L187); `event.service.ts` `getEventById` `assigned_students.student` (~L335);
+  `faculty.service.ts` `mapFacultyStudent` (~L234, source already had the column). **Already carried branch (no BE
+  change):** NOC (`NOC_STUDENT_SELECT`), student self-profile (`getMyProfile` full-record `include`), internships
+  (Tier 1). Offers were **skipped** (no screen reads `student.branch`). **FE types gained `branch`:**
+  `ApiStudentPersonal` (student.ts), `FacultyStudentListItem` (faculty.ts), `ApiEventStudentAssignment.student`
+  (event.ts), `ApiApplicationListItem/Detail.student` + the legacy flat `Application` (application.ts),
+  `RecruiterApplication.student` (recruiter.ts), `ApiNocStudentSummary` (noc.ts). **New helper `getNocBranch`**
+  in `nocModule.ts` (beside `getNocDepartment`, which is now unused-but-kept); the internship cells use the Tier-1
+  `getInternshipBranch`. **Display/label swaps Department→Branch:** student `Profile.tsx`; faculty
+  `DepartmentStudents` export column (page title "Department Students" stays — nav branding); event tables
+  `EventDetailDialog`/`EventAttendanceDialog`/`EventAssignmentDialog` (the assignment dialog's local `Candidate`
+  type field renamed `department`→`branch`, mapped from all 3 sources incl. the `ApiAdminStudent` fallback which
+  already has branch); recruiter `RecruitmentPipeline` (col/cell/sort/search/detail) + `CandidateDetailSheet`
+  (mock-backed via `getMockCandidateProfile` — relabel only); faculty/recruiter `*Internships` cells; NOC cards
+  `AdminNOCManagement`/`FacultyNOCApprovals`(+CSV)/`NOCReviewDialog`/`NOCRequestWizard`; `applicationExport.ts` +
+  `ExportCandidatesDialog` (mock/log-only — relabel). ⚠ Faculty NOC "Rejected by Department"/"Department Requests"
+  stat cards are the faculty's own SCOPE branding, left (Tier 3). BE tsc 0, FE tsc 67 (baseline unchanged).
+  **Only Phase 5 remains** (retire the `branch` MasterCategory + physically drop `Student.department`/
+  `User.department` — the destructive migration). [[branch-level-targeting-followup]] [[working-preferences]]
+- **Drop-department Phase 5 (LOGICAL drop — keep columns, no migration). Department is now gone from every
+  student-facing UI; `Student.department`/`User.department` columns are KEPT.** (Added 2026-08-28.) ⚠ Chosen over a
+  physical column drop because **`deriveBranch` returns `null` when ERP has no `branchName`** (auth.service.ts, no
+  course fallback) — so `Student.department` is the deliberate **null-branch safety net** and the backend safety-net
+  matchers (`faculty-scope.ts` department arm, `offer.service.ts:33`, policy `?? department` in `posting-type-policy.ts`/
+  `student.service.ts`/`policy.service.ts`, `application.service.ts` eligibility, announcement scope) are **left as-is
+  — do NOT remove them.** **Part A (done):** added `branch` to the last student payloads that lacked it — offers
+  (`offer.service.ts` getOffers+getOfferById selects), posting-offer (`posting.service.ts` getPostingById select),
+  faculty programs (`faculty.service.ts` `mapProgramStudent`) — plus FE types `ApiOfferListItem/Detail.student`,
+  `ApiPostingOfferStudent`, `FacultyProgramStudent`, flat `Offer`. Swapped the ~14 remaining display reads to
+  **`branch ?? department`** (OfferDetailSheet, InternshipDetailSheet, ImportFromOffersDialog, ApplicationsManagement,
+  ApplicationPipeline, FacultyOffers, FacultyPrograms, Dashboard, Profile, AdminDashboard, OpportunityDetail). The
+  **client eligibility `context.department` now carries `branch ?? department`** (`OpportunityDetail`/`Opportunities`)
+  so `postingModule` branch-matching uses the ERP branch — `postingModule.ts` itself unchanged (it reads
+  `context.department`, which now holds the branch). Completeness-check arrays stay on `department` (always populated).
+  **Part B (PARTIAL):** removed DEAD branch-master code from `AnnouncementManagement` (`branchMasterValues`/
+  `branchOptions` were unused — the CRM `AnnouncementAudienceSelector` already sources `target_branches` via
+  `policyService.getBranchOptions`). ⚠ **The `branch` MasterCategory is RETAINED, NOT retired** — `NocTemplateManager`'s
+  `branch_scope` selector still uses `useMasterValues('branch')` and there is **no flat CRM branch endpoint** to replace
+  it (CRM branches are per-course), so the master's seeding (`masters.service.ts` derived block), the `MasterCategory`
+  union, and `MasterDataManagement` config all stay. `NOCReviewDialog:103` matcher was left on `student.department`
+  (Source-B branch_scope ⇒ match Source-B department) for internal consistency. **`User.department` is KEPT** (staff
+  faculty-scope field, no ERP replacement — dropping it empties faculty views). BE tsc 0, FE tsc 67. **Remaining
+  (deferred, needs a product decision):** how `NocTemplateManager.branch_scope` should source CRM branches (cascade vs
+  student-derived) — that unblocks fully retiring the `branch` master; and the physical drop of
+  `Student.department`/`User.department` (only safe once every student is guaranteed a branch). [[branch-level-targeting-followup]] [[working-preferences]]
+- **NOC module now uses the ERP branch (`Student.branch` / CRM `branchName`) instead of the course-derived
+  `department` — and the `branch` MasterCategory is retired.** (Added 2026-08-30, finishes the Phase-5 deferred NOC
+  item. NO migration.) **(A) Certificate shows the ERP branch in BOTH mirrored renderers** (per the renderer-mirror
+  rule): the snapshot `buildNocCertificateSnapshot` `values.branch` (→ `NocTemplatePreview` on-screen) and the PDF
+  path — added a `branch` field to **both** `NocCertificateStudent` types (`noc.service.ts` + `noc-certificate.renderer.ts`),
+  fed `noc.student.branch ?? noc.student.department` at the **three** certificate-context builders, and switched the
+  `{branch}` token + the fixed **"Branch"** row to `context.student.branch`; the `{department}` token stays on
+  `department`. ⚠ One certificate-source student `select` lacked `branch` — added `branch: true` (the others already
+  had it). **(B) Template matching keys on branch (department fallback):** `getTemplateForProgram` (noc-template.service)
+  now accepts branch+department **candidates** (`string | string[]`) and matches `branch_scope` against any, then
+  `'all'`, then first; caller passes `[noc.student.branch, noc.student.department]`; FE `NOCReviewDialog:103`
+  OR-matches `branch || department`. **(C)** `nocTemplateModule.ts` branch mapper → `branch ?? department`.
+  **(D) The NOC-template `branch_scope` selector was repointed from the Source-B `branch` master to a CRM
+  Institute→Course→Branch cascade** (`NocTemplateManager` now uses `usePolicyInstituteOptions`/`usePolicyCourseOptions`/
+  `usePolicyBranchOptions`, same pattern as `EligibilityRulesTab`), emitting a real ERP BranchName (+ `ALL`); an
+  existing template's legacy `branch_scope` is merged into the options on edit-load so it stays editable. `branch_scope`
+  is still a single string, so storage + `normalizeScopeValue` matching are unchanged. **(E) The `branch` MasterCategory
+  is RETIRED** — the derived seeding block in `masters.service.ts` was removed and **`useMasterValues('branch')` now has
+  ZERO consumers** (NOC was the last; Announcement's was dead-code-removed in Phase 5). ⚠ The FE `MasterCategory` type/
+  config entry (`master.ts`, `MasterDataManagement` `MASTER_CATEGORY_ORDER`) is **kept as harmless dead code** — the
+  `noc_templates` section uses `'branch'` only as a throwaway placeholder (`activeMasters=[]`, `activeConfig=null`), and
+  removing it from the union would entangle that shim; not worth the risk. Existing `MasterOption category='branch'` rows
+  are inert (optional future cleanup). `Student.department` column + the backend safety-net matchers stay. BE tsc 0, FE
+  tsc 67. **This completes the drop-department effort across every module.** [[noc-flow]] [[branch-level-targeting-followup]] [[working-preferences]]
+- **Admin/faculty date-range filters: send date-only `yyyy-MM-dd`, never `Date.toISOString()`.** (Added
+  2026-08-30, NO migration.) `AdminListScopeFilters` emits raw `Date` objects at **local midnight**; the old
+  per-screen serialization `dateRange.from?.toISOString()` converted that to a UTC instant on the **previous**
+  calendar day for +offset zones (IST → `2026-08-24T18:30:00Z` for a picked 25 Aug). The backend
+  `buildDateRangeCondition` (`shared/utils/student-scope-filter.ts`) then did `end.setHours(23,59,59,999)` in
+  the **server's** local TZ on that already-shifted instant, so on a UTC server a same-day filter collapsed to
+  a ~5.5h window on the wrong day → "filter returns nothing". Fix: (a) new shared **`toDateParam(date)`** in
+  [lib/formatters.ts](frontend/src/lib/formatters.ts) returns local `yyyy-MM-dd` (via date-fns `format`, local
+  parts — no UTC shift); every AdminListScopeFilters consumer now sends date-only (13 screens: StudentListTab,
+  CompanyListTab, InterestLists, OffersManagement, ApplicationsManagement, ApplicationPipeline, PostingsManagement,
+  DrivesManagement, AdminNOCManagement, AnnouncementManagement, FacultyOffers, DepartmentStudents,
+  FacultyNOCApprovals — `SelectionDatabaseTab` already did). (b) `buildDateRangeCondition` now treats a
+  `yyyy-MM-dd` string as an explicit **UTC calendar day** (`T00:00:00.000Z`..`T23:59:59.999Z`) — deterministic
+  regardless of server TZ; **full-ISO/`Date` callers keep the legacy server-local `setHours` path** (backward
+  compatible, don't remove it). ⚠ **Separately, the Interest table never filtered at all**: `admin.service.ts`
+  `getInterestRegistrations` keyed the date clause on **`created_at`** inside `interest_registrations.some({…})`,
+  but `InterestRegistration` has no such column — its timestamp is **`registered_at`** (the bad field slipped
+  past TS via a `...(cond ? { created_at } : {})` spread). Fixed to `registered_at`. **Reports use a SEPARATE
+  `parseDateRange` path** (`report.analytics.service.ts`) and were intentionally left alone. When wiring a new
+  date filter, always use `toDateParam` on the FE and `buildDateRangeCondition` on the BE. [[working-preferences]]
+- **Events/Drives per-drive Attendance Export/Import is client-side and loops the single-student mark endpoint
+  (there is NO bulk attendance API).** (Added 2026-08-30, FE-only, no migration.) On `DrivesManagement.tsx` each
+  drive row (gated on `_count.assigned_students > 0`) has **Att. Export** and **Att. Import** beside the
+  Attendance dialog button. Export calls `driveService.getEventDetail(id)` and downloads
+  `attendance_<title>_<date>.xlsx` with **Enrollment No / Name / Branch / Status** — this file doubles as the
+  import template. Import opens a hidden `<input type=file accept=".xlsx,.csv">`, parses it via new
+  **`src/lib/attendanceImport.ts`** `parseAttendanceRows` (ExcelJS for .xlsx / minimal CSV parser; locates the
+  "Enrollment No" + "Status" columns by header; normalizes status to the backend enum **present|absent|late**,
+  `p/a/l` accepted, `excused` NOT), matches enrollment→`student_id` from the drive's `assigned_students`, and
+  loops `driveService.markAttendance(eventId, {student_id, attendance})` via `Promise.allSettled` (the only
+  attendance write — `PUT /events/:eventId/attendance`, one student per call). Unmatched/unassigned enrollments
+  are **skipped and counted** in the toast (the endpoint requires an existing `EventStudent` row); it then
+  invalidates `eventKeys.all` + `eventKeys.detail`. **Events also gained the Academic-Year⇄Posting-Type filter**
+  via `AdminListScopeFilters` (`academicYear` + `postingType` bind:'id'); academic year is **options-only** here
+  (Event has no `academic_year` column, so it narrows the posting-type list, never sent to the backend). The
+  event-list Export was also fixed off the `limit:1000` → paginationSchema `.max(100)` Zod-400 (now pages at
+  100). [[working-preferences]]
+- **RBAC Roles-tab toggles are now ENFORCED (were largely cosmetic) — the permission matrix is the real control
+  surface.** (Added 2026-08-30, from `SOU Meeting 2026.05.14 - ROLES.pdf`. NO migration.) Two plumbing layers
+  already existed and are the enforcement path: FE `hasPermission(user.permissions, {module,action}, role)`
+  ([permissionModule.ts](frontend/src/lib/permissionModule.ts); `super_admin` always true) + BE
+  `requirePermission(module,action)` ([permission.ts](backend/src/middleware/permission.ts); reads the
+  `RolePermission` row, `super_admin` bypasses). The gaps that were fixed: **(1) students had ZERO permission
+  enforcement** — student routes/sidebar were role-only. Now the student **placement sidebar items + the
+  `/applications`,`/noc`,`/drives`,`/no-dues` routes carry `requiredPermission {module,view}`**, the student nav
+  lists are `.filter(canAccessNavItem)`, `ProtectedRoute.requiresPermissionSync` includes `student`, and the
+  **BE student routes gained `requirePermission`** (GET `/my`→view; apply/create/upload→create; withdraw→delete)
+  on applications/noc/events(`/my`)/no-dues. Student `ROLE_MODULE_DEFAULTS` (permissions.ts:136-148) already
+  grant these, so existing tenants are unaffected until a flag is toggled OFF. **(2) Action buttons ignored the
+  create/edit/export/approve flags** — now `ApplicationsManagement` Export gated on `applications/export`;
+  `OffersManagement` Export/Create/Reject/Joining + `OfferDetailSheet readOnly={!canEdit}` gated on
+  `offers/export|create|edit`. **(3) Faculty portfolio** — added a `faculty_coordinator portfolios can_view:true`
+  DEFAULT, gated `GET /portfolio/:studentId` on `portfolios/view`, and gated the faculty Department-Students
+  Portfolio tab. ⚠ **Existing tenants already have a `(faculty_coordinator, portfolios)` RolePermission row
+  seeded `can_view=false`** (`ensureTenantRolePermissions` only inserts MISSING combos, and faculty had no
+  portfolios default before), so faculty portfolio is OFF by default on existing tenants until a Super Admin
+  enables Portfolios→View for faculty in the Roles tab. **(4) Circulars** got a hard delete
+  (`deleteGeneratedCircular` + `DELETE /circulars/generated/:id` gated `circulars/delete`; generated circulars
+  are immutable snapshots with no status, so delete-only, no edit). **(5) Interest Lists** got a hard remove
+  (`deleteInterestRegistration` + `DELETE /admin/interests/registrations/:id` gated `interest_lists/delete`;
+  distinct from the existing SOFT withdraw). **(6) Reports Excel was blank** — `ReportsAnalytics.handleExport`
+  wrote a CSV string into an `application/vnd.ms-excel` Blob named `.xlsx` (Excel "format doesn't match" →
+  blank); now routes through `downloadExcelTable`/`downloadCsvTable` (headers[]+rows[][]) + empty-rows guard.
+  **(7) Management column HIDDEN** — removed `'management'` from `SYSTEM_ROLE_ORDER`
+  ([securityModule.ts](frontend/src/lib/securityModule.ts)); Management has no dashboard (profile page only). The
+  role was NOT removed from types/auth/routing; `SYSTEM_ROLE_CONFIG['management']` kept. Note **`export` has no
+  server endpoint** (all exports are client-side), so `can_export` is FE-gated only. BE tsc 0, FE tsc 65
+  (baseline). [[working-preferences]]
+- **NOC form auto-populates an existing company's details (address + recruiter contact) on select — via the
+  enriched `GET /noc/field-suggestions`, NOT a new endpoint.** (Added 2026-09-21, NO migration.) The
+  student-safe `getNocFieldSuggestions` (`noc.service.ts`) is the ONLY company endpoint a student can call
+  (the employers API is admin/faculty only). It now selects `address/city/state/pan/gst` + `recruiters{...}`
+  per company and maps each to a **single** recruiter via the exported `pickCompanyRecruiter` (verified-else-
+  earliest — the same helper `createNoc` already uses), dropping the raw recruiters array so the payload stays
+  bounded (`companies: NocCompanySuggestion[]` = `{id,name,address,city,state,pan,gst,recruiter|null}`). ⚠
+  **Company has no `pincode` column** (pincode lives only on `NocRequest.company_pincode`), so the form's
+  Pincode stays manual — only address/city/state/pan/gst + recruiter auto-fill. FE: `NocFieldSuggestions.companies`
+  widened (`types/noc.ts`); `NOCRequestWizard` builds a `companyByName` map and, in the self-sourced Company
+  `SearchableSelect` existing-company branch, `setForm`-prefills the company + `contact_person_*` block
+  (replaces it, mirroring the offer-prefill `handlePlacementSelectionChange`), setting `stateOther` when the
+  prefilled state isn't in `INDIAN_STATES`. The recruiter's email/phone are intentionally exposed to the
+  student raising the NOC for that company (that's the feature). This just surfaces data `createNoc` already
+  recovered server-side, before submit. [[noc-flow]]
+- **Placement restrictions are PER-POSTING-TYPE: the offer block is now scoped to the same Posting Type +
+  honours an admin Override (was global + permanent + override-blind).** (Added 2026-09-21, NO migration.) From
+  the requirement "after Admin approval a student may view/apply that Posting Type; a released Offer (no
+  Override) blocks another apply in the SAME type; an issued NOC blocks another apply / a new NOC in the same
+  type (Re-Issue only) — none of it affecting OTHER Posting Types." **Two of the three were already built and
+  needed no change**: approved-interest view+apply via `assertInterestRegistered`/`getApprovedInterestValues`
+  ([posting-type-interest.ts](backend/src/shared/utils/posting-type-interest.ts)); NOC-issued same-type
+  apply-block via `assertNoSelfPlacedNoc` ([self-placed-noc-block.ts](backend/src/shared/utils/self-placed-noc-block.ts))
+  + new-NOC block via the `NOC_ALREADY_ISSUED` guard with the `is_reissue` bypass
+  ([noc.service.ts](backend/src/modules/noc/noc.service.ts) `createNoc`, mirrored in `NOCRequestWizard.tsx`). **The
+  only gap was the offer block.** `offer-block.ts` was rewritten: the global `assertNoExistingOffer(studentId)`
+  (`prisma.offer.count` by student only — blocked EVERY type, counted even rejected offers, ignored override)
+  is **removed** and replaced by `BLOCKING_OFFER_STATUSES = [pending_student_action, accepted]`,
+  `getBlockingOfferProgramValues(studentId)` (those statuses AND `admin_override_enabled: false`, mapped to
+  `posting.posting_type_master.value`), and `assertNoBlockingOfferForType(studentId, postingTypeMasterId)` →
+  `APPLICATIONS_LOCKED_BY_OFFER` — mirrors `self-placed-noc-block.ts`. ⚠ In `apply()`
+  ([application.service.ts](backend/src/modules/applications/application.service.ts)) the guard **moved from the
+  very top (before the posting was even loaded) into the per-type guard group AFTER the posting load**
+  (right after `assertNoSelfPlacedNoc`), since it now needs `posting.posting_type_master_id`.
+  `registerInterests` ([student.service.ts](backend/src/modules/students/student.service.ts)) swaps the global
+  call for a per-requested-type check (mirrors its self-placed-NOC handling, naming the blocked type[s]).
+  **Override = the offer's existing `admin_override_enabled`** flag — admin sets that offer's compliance to
+  **"Override Enabled"** in the Offer detail sheet (`updateCompliance` → `admin_override_enabled: true`); the UI
+  already exists ([OfferDetailSheet.tsx](frontend/src/components/offers/OfferDetailSheet.tsx)), **no new admin
+  UI**. Do NOT confuse it with the POSTING flag `application_override_enabled` (that only bypasses the FE
+  application DATE window, unrelated). **Rejected offers no longer block** (only `pending_student_action` /
+  `accepted`). FE per-type surfaces: `OpportunityDetail` readiness reason, `Dashboard` register-interest gate
+  (`blockingOfferTypeValues` set + `offerBlockReasonFor(value)` helper used in handlers + interest cards — the
+  old single `offerBlockReason` string is gone), `MyApplications` banner reworded to per-type. All FE matches on
+  `offer.posting.type` (the master value `getMyOffers` returns) normalized, exactly like the self-placed-NOC
+  match. Verified read-only on the dev DB. BE tsc 0, FE tsc 65 (baseline; the 3 flagged `OpportunityDetail`
+  errors are the pre-existing `getPostingTypeLabel` baseline, not new). [[working-preferences]] [[noc-flow]]
+- **NOC RE-ISSUE inherits the PREVIOUS NOC's Posting Type (`program`) — the student cannot re-issue under a
+  different type.** (Added 2026-09-21, NO migration.) Previously `createNoc`
+  ([noc.service.ts](backend/src/modules/noc/noc.service.ts)) resolved `program` from `data.program` (student
+  input) BEFORE the re-issue branch, and the re-issue branch loaded `previous` selecting only
+  `{id,status,noc_number}` — so a re-issue used whatever posting type the student picked (the previous NOC's
+  `program` was never even loaded). **Fix (backend = source of truth):** `resolvedProgram` is now a `let`
+  resolved INSIDE the branches — the **re-issue branch selects `program` off `previous` and forces
+  `resolvedProgram = previous.program`** (ignoring `data.program`); the master/legacy resolution
+  (`normalizeNocProgramValue`/`masterOption.findFirst`/`LEGACY_NOC_PROGRAMS`), the `INVALID_NOC_PROGRAM` throw,
+  and the `NOC_ALREADY_ISSUED` check moved into the non-reissue `else`. Downstream is unchanged and follows the
+  stored `program`: `nocData.program`, the notification/audit, and (via `noc.program` at issue time) template
+  selection `getTemplateForProgram` + the certificate snapshot. **Schema unchanged** (`program` stays required;
+  the backend just ignores `data.program` for re-issues — a mismatched client payload is still forced onto the
+  previous NOC's type). **FE** ([NOCRequestWizard.tsx](frontend/src/components/noc/NOCRequestWizard.tsx)):
+  selecting the previous NOC `setForm`-prefills `program` from that record (`reissueableNocs` already carry
+  `program`); the re-issue toggle re-syncs on enable / clears on disable; the placement-source reset preserves
+  program during re-issue (`program: current.request_reissue ? current.program : ''`); the Program field renders
+  a **read-only inherited display** ("Inherited from the previous NOC — a re-issue keeps the same Posting Type")
+  instead of the editable `SearchableSelect` while `request_reissue` is on; and `validateNocForm` skips the
+  master-membership check for re-issues (an inherited program can legitimately be outside the student's current
+  eligible list). Verified read-only on the dev DB (a re-issue of an issued type with a different submitted
+  program resolves to the previous program). BE tsc 0, FE tsc 65 (baseline). [[noc-flow]] [[working-preferences]]
+- **⚠ SUPERSEDED (same day) — the CRM moved AGAIN to `http://115.244.149.106:44326/api/CRMAPIStudent/` (a full
+  Student+Employee+Department API). See the "CRM host is now `:44326`" finding below; the `:44325`/`Curriculum`
+  details here are historical.** The CRM audience endpoints (Institute/Course/Branch options) live under `/api/Curriculum/`, NOT
+  `/api/CRMAPIStudent/` — the latter now 404s.** (Added 2026-09-21.) The TPO-admin Institute→Course→Branch
+  filter dropdowns (`AdminListScopeFilters` → `usePolicyInstituteOptions/Course/Branch` →
+  `GET /api/policies/audience/{institutes,courses,branches}` → `policy.service.ts` `fetchCrmList`) were empty on
+  **every** admin list screen because the configured `CRM_*_LIST_URL` pointed at the retired
+  `/api/CRMAPIStudent/` controller (HTTP 404 → `CRM_LOOKUP_FAILED` → empty dropdown). The CRM moved them to
+  **`/api/Curriculum/`**: `GetInstituteList` (no params), `GetCourseList?InstituteId=`, `GetBranchList?CourseId=`
+  — same param names (`InstituteId`/`CourseId`/`BranchId`) and `Api-Key` header the code already uses (confirmed
+  via the CRM's Swagger at `http://115.244.149.106:44325/swagger/v1/swagger.json`). Fixed the three list URLs in
+  `env.ts` defaults + `.env.example` (committed) and the local `backend/.env`. ⚠ **The `CRM_API_KEY` must be a
+  REAL key** — the corrected URL returns **401 "Incorrect API Key"** with the placeholder
+  `slkdjfiok;dfposdjfpkjoidshd -123`; set the real key in `.env` and **restart the backend** (`.env` changes
+  need a restart). ⚠ **`CRM_STUDENT_DETAIL_URL` (`…/api/CRMAPIStudent/GetStudentDetailByEnrollmentNo`) is on the
+  same dead controller** (student signup CRM lookup likely broken too); the new Curriculum controller has **no
+  1:1 replacement** (`GetStudentsDetails` = list by InstituteId/BranchId/SemesterId/SectionId;
+  `GetStudentSubjectsByEnrollmentNo` = subjects) — needs the correct endpoint from the CRM team before changing.
+  App code is correct/unchanged; this is purely CRM configuration. [[working-preferences]]
+- **CRM host is now `http://115.244.149.106:44326/api/CRMAPIStudent/` — a FULL Student+Employee+Department API
+  (supersedes the `:44325`/`Curriculum` split above).** (Added 2026-09-21, config-only, NO migration.) The CRM
+  moved again; the new host (Swagger `MicroWebUMS.CRMApiStudentPlacement`) **restores the full
+  `/api/CRMAPIStudent/` controller** — `GetInstituteList` (no params), `GetCourseList?InstituteId=`,
+  `GetBranchList?CourseId=`, `GetAllDepartments?DepartmentType=`, `GetEmployeesList?DepartmentType=&DepartmentId=`,
+  `GetEmployeeDetail?EmpId=`, **`GetStudentDetailByEnrollmentNo?EnrollmentNo=`** — all with the SAME param + field
+  names the code already uses (institute `instituteId/instituteName`; student-detail `officialEmail/personalEmail/
+  studentMobileNo/branchName/courseShortName/…`). **Fix = every `CRM_*_URL` → `:44326/api/CRMAPIStudent/<Endpoint>`**
+  in `env.ts` defaults (all 7) + `.env.example` + local `backend/.env` (added the 3 previously-absent
+  DEPARTMENT/EMPLOYEE URLs so `.env` is complete). ⚠ **The `CRM_API_KEY` did NOT change** — the existing key
+  authenticates on `:44326` (unlike `:44325` which 401'd it). No app code, no schema. **This also RESTORED student
+  signup + the signup-OTP email** — both need `GetStudentDetailByEnrollmentNo`, which is live again (the "no 1:1
+  replacement" caveat in the superseded finding above and in the OTP/signup findings is now MOOT). Verified live
+  via the real `getInstituteOptions()` service path (53 institutes) + direct curls (all HTTP 200). ⚠ `.env`
+  changes need a **backend restart**. [[working-preferences]]
+- **Student signup OTP is now REAL (generated + emailed via ZeptoMail) — the static `000000` is a dev-only
+  fallback.** (Added 2026-09-21, NO migration.) The 3-step in-memory flow (`requestStudentSignupOtp` →
+  `verifyStudentSignupOtp` → `completeStudentSignup`, [auth.service.ts](backend/src/modules/auth/auth.service.ts))
+  is unchanged in shape; only OTP generation/delivery changed. **NEW transport
+  [email.ts](backend/src/shared/utils/email.ts)** — `sendEmail()`/`mailEnabled()` POST ZeptoMail
+  (`https://api.zeptomail.in/v1.1/email`) over global `fetch` (no npm dep, mirrors `fetchCrmList`); the auth
+  header value is the FULL `Zoho-enczapikey …` string. `env.ts` adds `mailZeptoUrl`/`mailZeptoToken`/
+  `mailFromAddress`/`mailFromName`. `requestStudentSignupOtp` is **token-gated**: mail configured → random
+  6-digit `generateOtp()` emailed to the CRM official email (send failure → 422 `OTP_EMAIL_FAILED`); **not
+  configured + dev** → static `STUDENT_SIGNUP_OTP` fallback (logged, dev only); **not configured + production**
+  → 422 `OTP_EMAIL_NOT_CONFIGURED` (**never `000000` in prod**). Response now returns `masked_email`; the OTP is
+  not logged on the emailed path; `verifyStudentSignupOtp` locks after 5 wrong tries
+  (`OTP_ATTEMPTS_EXCEEDED`, new `attempts` field on the session). FE (`Login.tsx` + `authService.ts`): OTP step
+  reframed to email, `000000` hints removed, new error messages, and a **Resend OTP** button (30s cooldown).
+  ⚠ **The ZeptoMail token is a SECRET** — it lives in `backend/.env` only (gitignored); `.env.example` + `env.ts`
+  carry placeholders/empty. ⚠ **This supersedes the earlier "No email transport configured" finding for the
+  signup flow** (other "we'll email the user" TODOs remain unwired unless they adopt `sendEmail`). ⚠ **Full
+  end-to-end signup still needs the CRM `GetStudentDetailByEnrollmentNo` endpoint restored** — it's on the retired
+  `/api/CRMAPIStudent/` controller with no `/api/Curriculum/` replacement yet (`requestStudentSignupOtp` calls it
+  before issuing the OTP). ZeptoMail transport verified live (a test send was accepted). [[working-preferences]]
+- **Resumes keep their id: "Update" replaces the file in place; a resume used in an application can't be
+  deleted.** (Added 2026-10-23, NO migration.) `PUT /students/me/resumes/:resumeId` (multipart, `resumeUpload`,
+  PDF-only) → `student.service.updateResume` swaps `file_url`/`file_size`/`mime_type` (+ optional `name`) and
+  bumps `uploaded_at`, keeping the id so `Application.resume_id` stays valid (old file left on disk, like
+  delete). `deleteResume` throws 422 `RESUME_IN_USE` when any application references the resume, and
+  `getResumes` returns `application_count` — `Resumes.tsx` hides Delete for used resumes and shows **Update**
+  for all. ⚠ **PlaceReady AI interviews depend on this**: at interview start PlaceReady reads the resume on the
+  student's application to the drive's posting (via `GET /admin/students/:id` → `applications[].resume`) else
+  the default resume, and downloads `file_url` through `/api/uploads` — don't reintroduce delete-and-reupload
+  for used resumes or change the admin student payload's `resumes`/`applications[].resume` shape.
+- **CRM renamed the score fields `currentSemesterSPI/CPI/CGPA` → `spi`/`cpi`/`cgpa` — read them through
+  `crmScores()`.** (Fixed 2026-10-23, NO migration.) `GetStudentDetailByEnrollmentNo` on the `:44326` host
+  returns `spi`, `cpi`, `cgpa` (+ `result_Semester`, `result_Status`); signup still read the old names, got
+  `undefined`, and seeded `academic_profile.cgpa = 0` for every new student → TPO Admin → Students showed
+  CGPA 0 and every CGPA eligibility rule failed. `auth.service.ts` now exports `crmScores(student)` (new key
+  first, legacy key fallback, ≤0 = missing) + `crmCgpa(student)` (= `cgpa` ?? `cpi`, product decision: CRM
+  `cgpa` first even though it currently equals the semester SPI where filled). Existing students: run
+  `npx tsx scripts/backfill-student-cgpa-from-crm.ts` (dry-run) then `--apply` (`--all` re-syncs everyone,
+  e.g. after new results). **PlaceReady had the same stale mapping** (`crm-client.ts`) → its own
+  `crmScores` + `placeready/backend/scripts/backfill-student-scores-from-crm.ts`. If the CRM renames fields
+  again, dump one raw `fetchStudentFromCrm` response before guessing.
+- **SOU portal → PlaceReady event webhook (SR 36, added 2026-10-27, NO SOU migration).** SOU and PlaceReady have
+  separate DBs and logins; until now only PlaceReady called SOU (GET-only service account). Now
+  `backend/src/shared/utils/placeready-webhook.ts` `sendPlaceReadyEventWebhook(kind, eventId, studentIds)` POSTs
+  `{tenant_slug, kind: published|assigned, event, students:[{id, enrollment_number}]}` to `PLACEREADY_WEBHOOK_URL`
+  with header `x-sou-webhook-key` = `PLACEREADY_WEBHOOK_SECRET` (must equal PlaceReady's `PR_SOU_WEBHOOK_SECRET`).
+  Wired in `event.service.ts`: `updateEventStatus` → published (all assigned), `assignStudents` (only NEWLY assigned
+  — a panel move isn't news), `assignPipelineStudents` (only new rows, only when the event is already published).
+  Fire-and-forget, 5 s timeout, no-op when either env var is empty — **never let it throw into SOU flows.**
+  PlaceReady matches students by SOU id OR enrollment number (PlaceReady signups get their own uuid). [[working-preferences]]
+- **PlaceReady AI interviews speak through Sarvam AI (Batch F, 2026-10-28) — Indian-accent English + Hindi/Gujarati/…;
+  Deepgram is the fallback.** `placeready/agent/src/main.ts` `buildVoice(language)`: `@livekit/agents-plugin-sarvam`
+  (Node plugin **1.9.4**, peer-pinned to `@livekit/agents` 1.9.4 exactly) — STT `saaras:v3` streaming, `mode:'codemix'`,
+  `flushSignal:true`; TTS `bulbul:v3`, one fixed speaker (`SARVAM_TTS_SPEAKER`, default `shubh`) that speaks every
+  language via `targetLanguageCode`. ⚠ Plugin limits: **no interim STT words** (final sentences only), no `saaras:v4` /
+  `bulbul:v4-flash` literals (v4-flash only via `SARVAM_TTS_MODEL` cast — untested), no LLM class (Sarvam-105B runs
+  through the OpenAI plugin / SDK at `https://api.sarvam.ai/v1`, `provider:'sarvam'` in `shared/ai-models.ts`; a key
+  without chat-beta access gets 400). Language flow: `PrTestType.ai_languages` (TPO checkboxes) → mobile preflight chips →
+  `POST /pr/interviews/start {language}` → `resolveInterviewLanguage` (`shared/interview-languages.ts`, the ONE list
+  mirrored in `placereadyService.ts INTERVIEW_LANGUAGES`) → `config_snapshot.language` + `PrInterviewSession.language` →
+  prompt `languageInstruction()` + scoring hint + localized `HARD_STOP_GOODBYE`. Non en/hi sessions force
+  `turnDetection:'vad'` (LiveKit's cloud turn detector lacks Gujarati). Captions (SR 26) are LiveKit `lk.transcription`
+  streams read chunk-by-chunk in `voice_interview_screen.dart` (`utf8.decode(chunk.content)`). [[placeready-ai-interviews]]
+- File size watch: this `CLAUDE.md` is **~840 lines — WELL past the ~300 split threshold** (Set Instruction 7).
   Next substantial addition: promote domain conventions into `TPOADMIN.md` / `FACULTY.md` / `STUDENT.md` /
   `RECRUITER.md` and keep `CLAUDE.md` as the index. The `[[name]]` links point at memory files under
   `.claude/projects/-Users-…-souheptanesia-main-fe/memory/`.

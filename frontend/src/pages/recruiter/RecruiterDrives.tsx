@@ -1,9 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { Calendar, Clock, Eye, MapPin, Users } from 'lucide-react';
 import { format } from 'date-fns';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { EventDetailDialog } from '@/components/drives/EventDetailDialog';
 import { EmptyState } from '@/components/shared/EmptyState';
+import { ListPager } from '@/components/shared/ListPager';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -19,22 +20,29 @@ function getErrorMessage(error: unknown, fallback = 'Something went wrong') {
 
 export default function RecruiterDrives() {
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
-  const eventsQuery = useEvents({
-    page: 1,
-    limit: 100,
+  const [upcomingPage, setUpcomingPage] = useState(1);
+  const [pastPage, setPastPage] = useState(1);
+
+  const upcomingQuery = useEvents({
+    page: upcomingPage,
+    limit: 20,
+    statuses: ['published', 'ongoing'],
+    sort_by: 'date',
+    sort_order: 'asc',
+  });
+  const pastQuery = useEvents({
+    page: pastPage,
+    limit: 20,
+    statuses: ['completed', 'cancelled'],
     sort_by: 'date',
     sort_order: 'asc',
   });
 
-  const events = eventsQuery.data?.data ?? [];
-  const upcomingEvents = useMemo(
-    () => events.filter((event) => event.status === 'published' || event.status === 'ongoing'),
-    [events]
-  );
-  const pastEvents = useMemo(
-    () => events.filter((event) => event.status === 'completed' || event.status === 'cancelled'),
-    [events]
-  );
+  const upcomingEvents = upcomingQuery.data?.data ?? [];
+  const pastEvents = pastQuery.data?.data ?? [];
+  const upcomingTotal = upcomingQuery.data?.pagination.total ?? 0;
+  const pastTotal = pastQuery.data?.pagination.total ?? 0;
+  const eventsQuery = { error: upcomingQuery.error ?? pastQuery.error };
 
   return (
     <DashboardLayout
@@ -54,8 +62,8 @@ export default function RecruiterDrives() {
 
         <Tabs defaultValue="upcoming" className="space-y-4">
           <TabsList>
-            <TabsTrigger value="upcoming">Upcoming ({upcomingEvents.length})</TabsTrigger>
-            <TabsTrigger value="past">Past ({pastEvents.length})</TabsTrigger>
+            <TabsTrigger value="upcoming">Upcoming ({upcomingTotal})</TabsTrigger>
+            <TabsTrigger value="past">Past ({pastTotal})</TabsTrigger>
           </TabsList>
 
           <TabsContent value="upcoming" className="space-y-4">
@@ -108,6 +116,11 @@ export default function RecruiterDrives() {
                 </Card>
               ))
             )}
+            <ListPager
+              page={upcomingQuery.data?.pagination.page ?? 1}
+              totalPages={upcomingQuery.data?.pagination.totalPages ?? 1}
+              onPageChange={setUpcomingPage}
+            />
           </TabsContent>
 
           <TabsContent value="past" className="space-y-4">
@@ -145,6 +158,11 @@ export default function RecruiterDrives() {
                 </Card>
               ))
             )}
+            <ListPager
+              page={pastQuery.data?.pagination.page ?? 1}
+              totalPages={pastQuery.data?.pagination.totalPages ?? 1}
+              onPageChange={setPastPage}
+            />
           </TabsContent>
         </Tabs>
       </div>

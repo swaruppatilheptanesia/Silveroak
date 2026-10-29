@@ -2,7 +2,7 @@ import { useMemo, useState, type ReactNode } from 'react';
 import { Briefcase, CalendarDays, FileText, ListChecks, Loader2, Pencil, Plus, Tags, Trash2, Workflow } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatApiErrorMessage } from '@/lib/apiError';
-import { UserScopeSelector } from '@/components/admin/UserScopeSelector';
+import { PostingTypeScopeEditor } from '@/components/admin/PostingTypeScopeEditor';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { ConfirmActionDialog } from '@/components/shared/ConfirmActionDialog';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -35,15 +35,12 @@ import {
 } from '@/hooks/use-master-api';
 import { useAdminNocTemplates } from '@/hooks/use-noc-template-api';
 import { formatDateTime } from '@/lib/formatters';
-import type { ApiMasterOption, MasterCategory } from '@/types/master';
+import type { ApiMasterOption, MasterCategory, ScopeRow } from '@/types/master';
 import { NocTemplateManager } from '@/components/noc/NocTemplateManager';
 import type { ApiNocTemplate } from '@/types/nocTemplate';
 
 type TargetScopeState = {
-  target_institutes: string[];
-  target_courses: string[];
-  target_branches: string[];
-  target_semesters: string[];
+  scope_rows: ScopeRow[];
   target_academic_years: string[];
 };
 
@@ -150,12 +147,16 @@ function getErrorMessage(error: unknown, fallback = 'Something went wrong') {
 
 function createEmptyTargetScope(): TargetScopeState {
   return {
-    target_institutes: [],
-    target_courses: [],
-    target_branches: [],
-    target_semesters: [],
+    scope_rows: [],
     target_academic_years: [],
   };
+}
+
+// A row is complete only when all four cells are filled. Zero rows is allowed (= no targeting).
+function hasIncompleteScopeRow(rows: ScopeRow[]) {
+  return rows.some(
+    (row) => !row.institute.trim() || !row.course.trim() || !row.branch.trim() || row.semesters.length === 0,
+  );
 }
 
 function summarizeTargetScope(values: string[]) {
@@ -169,6 +170,7 @@ function summarizeTargetScope(values: string[]) {
 
   return `${values.slice(0, 2).join(', ')} +${values.length - 2}`;
 }
+
 
 /**
  * Delete confirmation copy. For posting types the backend also returns dependent-record counts:
@@ -345,11 +347,23 @@ function MasterCategoryCard({
                     </Badge>
                   </div>
                   {master.category === 'posting_type' ? (
-                    <div className="mt-2 grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
-                      <p>Institute: {summarizeTargetScope(master.target_institutes)}</p>
-                      <p>Course: {summarizeTargetScope(master.target_courses)}</p>
-                      <p>Branch: {summarizeTargetScope(master.target_branches)}</p>
-                      <p>Semester: {summarizeTargetScope(master.target_semesters)}</p>
+                    <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+                      {master.scope_rows && master.scope_rows.length > 0 ? (
+                        <div className="space-y-0.5">
+                          {master.scope_rows.map((row, index) => (
+                            <p key={index}>
+                              {row.institute} / {row.course} / {row.branch} / Sem {row.semesters.join(', ')}
+                            </p>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="grid gap-2 sm:grid-cols-2">
+                          <p>Institute: {summarizeTargetScope(master.target_institutes)}</p>
+                          <p>Course: {summarizeTargetScope(master.target_courses)}</p>
+                          <p>Branch: {summarizeTargetScope(master.target_branches)}</p>
+                          <p>Semester: {summarizeTargetScope(master.target_semesters)}</p>
+                        </div>
+                      )}
                       <p>Academic Year: {summarizeTargetScope(master.target_academic_years)}</p>
                     </div>
                   ) : null}
@@ -473,6 +487,11 @@ export default function MasterDataManagement() {
       return;
     }
 
+    if (category === 'posting_type' && hasIncompleteScopeRow(postingTypeDraftScope.scope_rows)) {
+      toast.error('Complete every targeting row (Institute, Course, Branch and at least one Semester) or remove it.');
+      return;
+    }
+
     try {
       await createMaster.mutateAsync({
         category,
@@ -545,10 +564,7 @@ export default function MasterDataManagement() {
     setEditingMaster(master);
     setEditValue(master.value);
     setEditingMasterScope({
-      target_institutes: master.target_institutes ?? [],
-      target_courses: master.target_courses ?? [],
-      target_branches: master.target_branches ?? [],
-      target_semesters: master.target_semesters ?? [],
+      scope_rows: master.scope_rows ?? [],
       target_academic_years: master.target_academic_years ?? [],
     });
   }
@@ -559,6 +575,11 @@ export default function MasterDataManagement() {
     const nextValue = editValue.trim();
     if (!nextValue) {
       toast.error('Value is required.');
+      return;
+    }
+
+    if (editingMaster.category === 'posting_type' && hasIncompleteScopeRow(editingMasterScope.scope_rows)) {
+      toast.error('Complete every targeting row (Institute, Course, Branch and at least one Semester) or remove it.');
       return;
     }
 
@@ -664,45 +685,9 @@ export default function MasterDataManagement() {
                 isCreatePending={createMaster.isPending}
               >
                 {currentCategory === 'posting_type' ? (
-                  <UserScopeSelector
-                    targetInstitutes={postingTypeDraftScope.target_institutes}
-                    targetCourses={postingTypeDraftScope.target_courses}
-                    targetBranches={postingTypeDraftScope.target_branches}
-                    targetSemesters={postingTypeDraftScope.target_semesters}
-                    targetAcademicYears={postingTypeDraftScope.target_academic_years}
-                    onTargetInstitutesChange={(values) =>
-                      setPostingTypeDraftScope((current) => ({
-                        ...current,
-                        target_institutes: values,
-                        target_courses: [],
-                        target_branches: [],
-                      }))
-                    }
-                    onTargetCoursesChange={(values) =>
-                      setPostingTypeDraftScope((current) => ({
-                        ...current,
-                        target_courses: values,
-                        target_branches: [],
-                      }))
-                    }
-                    onTargetBranchesChange={(values) =>
-                      setPostingTypeDraftScope((current) => ({
-                        ...current,
-                        target_branches: values,
-                      }))
-                    }
-                    onTargetSemestersChange={(values) =>
-                      setPostingTypeDraftScope((current) => ({
-                        ...current,
-                        target_semesters: values,
-                      }))
-                    }
-                    onTargetAcademicYearsChange={(values) =>
-                      setPostingTypeDraftScope((current) => ({
-                        ...current,
-                        target_academic_years: values,
-                      }))
-                    }
+                  <PostingTypeScopeEditor
+                    value={postingTypeDraftScope}
+                    onChange={setPostingTypeDraftScope}
                   />
                 ) : null}
               </MasterCategoryCard>
@@ -720,7 +705,9 @@ export default function MasterDataManagement() {
             }
           }}
         >
-          <DialogContent>
+          <DialogContent
+            className={editingMaster?.category === 'posting_type' ? 'max-w-5xl' : undefined}
+          >
             <DialogHeader>
               <DialogTitle>Edit Master Value</DialogTitle>
               <DialogDescription>
@@ -736,45 +723,9 @@ export default function MasterDataManagement() {
               />
             </div>
             {editingMaster?.category === 'posting_type' ? (
-              <UserScopeSelector
-                targetInstitutes={editingMasterScope.target_institutes}
-                targetCourses={editingMasterScope.target_courses}
-                targetBranches={editingMasterScope.target_branches}
-                targetSemesters={editingMasterScope.target_semesters}
-                targetAcademicYears={editingMasterScope.target_academic_years}
-                onTargetInstitutesChange={(values) =>
-                  setEditingMasterScope((current) => ({
-                    ...current,
-                    target_institutes: values,
-                    target_courses: [],
-                    target_branches: [],
-                  }))
-                }
-                onTargetCoursesChange={(values) =>
-                  setEditingMasterScope((current) => ({
-                    ...current,
-                    target_courses: values,
-                    target_branches: [],
-                  }))
-                }
-                onTargetBranchesChange={(values) =>
-                  setEditingMasterScope((current) => ({
-                    ...current,
-                    target_branches: values,
-                  }))
-                }
-                onTargetSemestersChange={(values) =>
-                  setEditingMasterScope((current) => ({
-                    ...current,
-                    target_semesters: values,
-                  }))
-                }
-                onTargetAcademicYearsChange={(values) =>
-                  setEditingMasterScope((current) => ({
-                    ...current,
-                    target_academic_years: values,
-                  }))
-                }
+              <PostingTypeScopeEditor
+                value={editingMasterScope}
+                onChange={setEditingMasterScope}
               />
             ) : null}
             <DialogFooter>

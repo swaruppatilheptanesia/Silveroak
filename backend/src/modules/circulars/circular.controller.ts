@@ -41,3 +41,15 @@ export async function getMyGeneratedCirculars(req: Request, res: Response, next:
   try { res.json({ circulars: await service.getGeneratedCirculars(req.user!.tenant_id) }); }
   catch (err) { next(err); }
 }
+
+export async function getGeneratedCircularsPaginated(req: Request, res: Response, next: NextFunction) {
+  try { res.json(await service.getGeneratedCircularsPaginated(req.user!.tenant_id, req.validated!.query as any)); }
+  catch (err) { next(err); }
+}
+
+export async function deleteGeneratedCircular(req: Request, res: Response, next: NextFunction) {
+  try {
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    res.json(await service.deleteGeneratedCircular(req.user!.tenant_id, id!));
+  } catch (err) { next(err); }
+}

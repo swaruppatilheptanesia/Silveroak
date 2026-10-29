@@ -28,6 +28,7 @@ export function useAnnouncements(params: AnnouncementQueryParams = {}, enabled =
     queryKey: announcementKeys.list(params),
     queryFn: () => announcementService.getAnnouncements(params),
     staleTime: 2 * 60 * 1000,
+    placeholderData: keepPreviousData,
     enabled,
   });
 }

@@ -1,4 +1,4 @@
-import { useDeferredValue, useMemo, useState } from 'react';
+import { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import {
   Archive,
   BarChart3,
@@ -18,6 +18,7 @@ import { ConfirmActionDialog } from '@/components/shared/ConfirmActionDialog';
 import { MasterMultiSelect } from '@/components/shared/MasterMultiSelect';
 import { EmptyState } from '@/components/shared/EmptyState';
 import { PageLoader } from '@/components/shared/PageLoader';
+import { ListPager } from '@/components/shared/ListPager';
 import { AnnouncementAudienceSelector } from '@/components/admin/AnnouncementAudienceSelector';
 import AdminListScopeFilters, { type DateRangeValue } from '@/components/admin/AdminListScopeFilters';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -73,7 +74,6 @@ import {
   useUploadAnnouncementAttachment,
 } from '@/hooks/use-announcement-api';
 import { useGeneratedCirculars } from '@/hooks/use-circular-api';
-import { useMasterValues } from '@/hooks/use-master-api';
 import { usePostings } from '@/hooks/use-posting-api';
 import {
   buildAnnouncementContentFromCircular,
@@ -85,8 +85,8 @@ import {
   getAnnouncementReadRate,
   getAnnouncementStatusMeta,
 } from '@/lib/announcementModule';
-import { formatDate, formatDateTime } from '@/lib/formatters';
-import { addMasterValue, mergeMasterValues } from '@/lib/masterModule';
+import { formatDate, formatDateTime, toDateParam } from '@/lib/formatters';
+import { addMasterValue } from '@/lib/masterModule';
 import type {
   AnnouncementPriority,
   AnnouncementStatus,
@@ -213,7 +213,7 @@ export default function AnnouncementManagement() {
     | null
   >(null);
   const deferredSearch = useDeferredValue(searchTerm);
-  const branchMasterValues = useMasterValues('branch');
+  const [page, setPage] = useState(1);
 
   const totalQuery = useAnnouncements({ page: 1, limit: 1 });
   const publishedQuery = useAnnouncements({ page: 1, limit: 1, status: 'published' });
@@ -221,16 +221,23 @@ export default function AnnouncementManagement() {
   const archivedQuery = useAnnouncements({ page: 1, limit: 1, status: 'archived' });
   const { sort_by, sort_order, onSort } = useServerSort<
     'title' | 'priority' | 'status' | 'published_at' | 'created_at'
-  >('created_at', 'desc');
+  >('created_at', 'desc', () => setPage(1));
+
+  useEffect(() => {
+    setPage(1);
+  }, [deferredSearch, statusFilter, priorityFilter, instituteFilter, courseFilter, branchFilter, dateRange.from, dateRange.to]);
+
   const announcementsQuery = useAnnouncements({
-    limit: 100,
+    page,
+    limit: 20,
+    search: deferredSearch.trim() || undefined,
     status: statusFilter === 'all' ? undefined : statusFilter,
     priority: priorityFilter === 'all' ? undefined : priorityFilter,
     institute: instituteFilter || undefined,
     course: courseFilter || undefined,
     branch: branchFilter || undefined,
-    date_from: dateRange.from ? dateRange.from.toISOString() : undefined,
-    date_to: dateRange.to ? dateRange.to.toISOString() : undefined,
+    date_from: toDateParam(dateRange.from),
+    date_to: toDateParam(dateRange.to),
     sort_by,
     sort_order,
   });
@@ -256,18 +263,7 @@ export default function AnnouncementManagement() {
     () => announcementsQuery.data?.data ?? [],
     [announcementsQuery.data],
   );
-  const filteredAnnouncements = useMemo(() => {
-    const normalizedSearch = deferredSearch.trim().toLowerCase();
-
-    if (!normalizedSearch) {
-      return announcements;
-    }
-
-    return announcements.filter((announcement) => {
-      return announcement.title.toLowerCase().includes(normalizedSearch)
-        || announcement.content.toLowerCase().includes(normalizedSearch);
-    });
-  }, [announcements, deferredSearch]);
+  const announcementsPagination = announcementsQuery.data?.pagination;
 
   const selectedAnnouncement = detailQuery.data
     ?? announcements.find((announcement) => announcement.id === selectedAnnouncementId)
@@ -277,10 +273,6 @@ export default function AnnouncementManagement() {
 
   const generatedCirculars = generatedCircularsQuery.data ?? [];
   const publishedPostings = postingsQuery.data?.data ?? [];
-  const branchOptions = useMemo(
-    () => mergeMasterValues(branchMasterValues.data ?? [], form.departments),
-    [branchMasterValues.data, form.departments],
-  );
 
   if (isInitialLoading) {
     return (
@@ -596,7 +588,7 @@ export default function AnnouncementManagement() {
 
         <Card>
           <CardContent className="p-0">
-            {filteredAnnouncements.length === 0 ? (
+            {announcements.length === 0 ? (
               <EmptyState
                 className="p-6"
                 compact
@@ -622,7 +614,7 @@ export default function AnnouncementManagement() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredAnnouncements.map((announcement) => (
+                    {announcements.map((announcement) => (
                       <TableRow
                         key={announcement.id}
                         className="cursor-pointer hover:bg-muted/50"
@@ -708,6 +700,12 @@ export default function AnnouncementManagement() {
             )}
           </CardContent>
         </Card>
+
+        <ListPager
+          page={announcementsPagination?.page ?? 1}
+          totalPages={announcementsPagination?.totalPages ?? 1}
+          onPageChange={setPage}
+        />
       </div>
 
       <Dialog

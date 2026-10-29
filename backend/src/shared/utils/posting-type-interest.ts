@@ -32,6 +32,20 @@ export async function getRegisteredInterestValues(studentId: string): Promise<Se
 }
 
 /**
+ * The set of normalized posting-type values the student has been WITHDRAWN from by a TPO admin
+ * (`status: withdrawn`). A withdrawn posting type is terminal for the student — they can neither
+ * apply to, register interest in, nor see postings/events under it. Empty set when none.
+ */
+export async function getWithdrawnInterestValues(studentId: string): Promise<Set<string>> {
+  const registrations = await prisma.interestRegistration.findMany({
+    where: { student_id: studentId, status: 'withdrawn' },
+    select: { interest_type: true },
+  });
+
+  return new Set(registrations.map((r) => normalizeType(r.interest_type)));
+}
+
+/**
  * The set of normalized posting-type values the student is APPROVED to apply to (`status: approved`).
  * Narrower than the visibility set — a pending registration does not grant apply rights until a TPO
  * admin approves it. Empty set when none.

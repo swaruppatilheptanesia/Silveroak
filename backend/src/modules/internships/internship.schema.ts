@@ -34,7 +34,11 @@ export const resolveIssueSchema = z.object({
 export const queryInternshipsSchema = paginationSchema.merge(sortSchema).merge(searchSchema).extend({
   status: z.enum(['ongoing', 'completed', 'discontinued']).optional(),
   student_id: z.string().uuid().optional(),
-  department: z.string().max(100).optional(),
+  institute: z.string().max(200).optional(),
+  course: z.string().max(200).optional(),
+  branch: z.string().max(200).optional(),
+  semester: z.string().max(20).optional(),
+  academic_year: z.string().max(20).optional(),
   batch: z.string().max(20).optional(),
   posting_type_master_id: z.string().uuid().optional(),
   internship_type: z.enum(['paid', 'unpaid', 'stipend_based']).optional(),

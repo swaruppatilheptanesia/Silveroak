@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { SearchableMultiSelect } from '@/components/shared/SearchableMultiSelect';
 import { usePostingTypeOptions } from '@/hooks/use-posting-type-options';
+import { filterPostingTypeOptionsByAcademicYear } from '@/lib/postingModule';
 
 export type SingleFilter = {
   value: string;
@@ -42,22 +43,32 @@ export default function ReportScopeFilters(props: ReportScopeFiltersProps) {
   const { postingTypes, institute, course, branch, semester, academicYear, passingYear } = props;
   const { options: postingTypeOptions, isLoading: postingTypesLoading } = usePostingTypeOptions(Boolean(postingTypes));
 
+  // Posting Type options depend on the selected Academic Year (records are unaffected).
   const postingTypeMultiOptions = useMemo(
-    () => postingTypeOptions.map((option) => ({ value: option.value, label: option.label })),
-    [postingTypeOptions],
+    () =>
+      filterPostingTypeOptionsByAcademicYear(postingTypeOptions, academicYear?.value).map((option) => ({
+        value: option.value,
+        label: option.label,
+      })),
+    [postingTypeOptions, academicYear?.value],
   );
+  // Gate Posting Type on a chosen Academic Year (only when this bar owns the year control).
+  const postingTypeGated = Boolean(academicYear) && !academicYear?.value;
 
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      {/* Academic Year renders immediately before Posting Type — they are related. */}
+      {academicYear ? <ScopeSelect filter={academicYear} /> : null}
       {postingTypes ? (
         <SearchableMultiSelect
           options={postingTypeMultiOptions}
           values={postingTypes.values}
           onChange={postingTypes.onChange}
-          placeholder="All Posting Types"
+          placeholder={postingTypeGated ? 'Select year first' : 'All Posting Types'}
           searchPlaceholder="Search posting type..."
           emptyMessage="No posting types defined."
           isLoading={postingTypesLoading}
+          disabled={postingTypeGated}
           buttonClassName="h-9 w-full text-xs"
         />
       ) : null}
@@ -66,7 +77,6 @@ export default function ReportScopeFilters(props: ReportScopeFiltersProps) {
       {course ? <ScopeSelect filter={course} /> : null}
       {branch ? <ScopeSelect filter={branch} /> : null}
       {semester ? <ScopeSelect filter={semester} /> : null}
-      {academicYear ? <ScopeSelect filter={academicYear} /> : null}
     </div>
   );
 }

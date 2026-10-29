@@ -15,12 +15,11 @@ import { APPLICATION_STAGE_CONFIG } from '@/types/application';
 import { useApplicantListReport, usePostingHistoryReport } from '@/hooks/use-report-analytics-api';
 import { ReportToolbar, downloadCSV, type DateRange } from './ReportToolbar';
 import PostingTypeFilter from './PostingTypeFilter';
-import { uniqueNonEmptyStrings } from './reportUtils';
 
 type QueryParams = {
   posting_id?: string;
   posting_type?: string;
-  department?: string;
+  branch?: string;
   stage?: string;
   search?: string;
   from?: Date;
@@ -32,7 +31,7 @@ export default function ApplicantListReport() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedPosting, setSelectedPosting] = useState('all');
   const [postingTypeFilter, setPostingTypeFilter] = useState('all');
-  const [deptFilter, setDeptFilter] = useState('all');
+  const [branchFilter, setBranchFilter] = useState('all');
   const [stageFilter, setStageFilter] = useState('all');
 
   const { data: postingHistoryData } = usePostingHistoryReport();
@@ -70,12 +69,12 @@ export default function ApplicantListReport() {
   const queryParams = useMemo<QueryParams>(() => ({
     posting_id: selectedPosting === 'all' ? undefined : selectedPosting,
     posting_type_master_id: postingTypeFilter === 'all' ? undefined : postingTypeFilter,
-    department: deptFilter === 'all' ? undefined : deptFilter,
+    branch: branchFilter === 'all' ? undefined : branchFilter,
     stage: stageFilter === 'all' ? undefined : stageFilter,
     search: searchQuery || undefined,
     from: dateRange.from,
     to: dateRange.to,
-  }), [dateRange.from, dateRange.to, deptFilter, postingTypeFilter, searchQuery, selectedPosting, stageFilter]);
+  }), [dateRange.from, dateRange.to, branchFilter, postingTypeFilter, searchQuery, selectedPosting, stageFilter]);
 
   const { data, isLoading } = useApplicantListReport(queryParams, Boolean(selectedPosting && selectedPosting !== 'all'));
 
@@ -84,7 +83,7 @@ export default function ApplicantListReport() {
       id: application.application_id,
       student_name: application.student_name,
       enrollment_number: application.enrollment_number,
-      department: application.department,
+      branch: application.branch,
       batch: application.batch,
       cgpa: application.cgpa,
       posting_title: application.posting_title,
@@ -98,18 +97,15 @@ export default function ApplicantListReport() {
     }));
   }, [data]);
 
-  const departments = useMemo<string[]>(
-    () => uniqueNonEmptyStrings(applications.map((application) => application.department)),
-    [applications],
-  );
+  const branches = useMemo(() => Array.from(new Set(applications.map((r: any) => r.branch).filter(Boolean))).sort() as string[], [applications]);
 
   const stats = data?.stats ?? { total: 0, shortlisted: 0, offers: 0, rejected: 0 };
 
   const handleExport = () => {
     const rows = applications.map((application) =>
-      `${application.student_name},${application.enrollment_number},${application.department},${application.cgpa ?? '-'},${application.posting_title},${application.company_name},${APPLICATION_STAGE_CONFIG[application.current_stage as keyof typeof APPLICATION_STAGE_CONFIG]?.label ?? application.current_stage},${new Date(application.applied_at).toLocaleDateString('en-IN')},${new Date(application.updated_at).toLocaleDateString('en-IN')}`
+      `${application.student_name},${application.enrollment_number},${application.branch},${application.cgpa ?? '-'},${application.posting_title},${application.company_name},${APPLICATION_STAGE_CONFIG[application.current_stage as keyof typeof APPLICATION_STAGE_CONFIG]?.label ?? application.current_stage},${new Date(application.applied_at).toLocaleDateString('en-IN')},${new Date(application.updated_at).toLocaleDateString('en-IN')}`
     );
-    const csv = `Student,Roll No,Department,CGPA,Opportunity,Company,Stage,Applied,Last Updated\n${rows.join('\n')}`;
+    const csv = `Student,Roll No,Branch,CGPA,Opportunity,Company,Stage,Applied,Last Updated\n${rows.join('\n')}`;
     downloadCSV(csv, 'applicant_list');
   };
 
@@ -155,12 +151,14 @@ export default function ApplicantListReport() {
                 ))}
               </SelectContent>
             </Select>
-            <Select value={deptFilter} onValueChange={setDeptFilter}>
-              <SelectTrigger><SelectValue placeholder="Department" /></SelectTrigger>
+            <Select value={branchFilter} onValueChange={setBranchFilter}>
+              <SelectTrigger className="w-full md:w-56">
+                <SelectValue placeholder="Branch" />
+              </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Departments</SelectItem>
-                {departments.map((department) => (
-                  <SelectItem key={department} value={department}>{department}</SelectItem>
+                <SelectItem value="all">All Branches</SelectItem>
+                {branches.map((branch) => (
+                  <SelectItem key={branch} value={branch}>{branch}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -185,7 +183,7 @@ export default function ApplicantListReport() {
                 <TableRow>
                   <TableHead className="min-w-[140px]">Student</TableHead>
                   <TableHead>Roll No.</TableHead>
-                  <TableHead>Department</TableHead>
+                  <TableHead>Branch</TableHead>
                   <TableHead className="text-center">CGPA</TableHead>
                   <TableHead className="min-w-[180px]">Opportunity</TableHead>
                   <TableHead>Stage</TableHead>
@@ -211,7 +209,7 @@ export default function ApplicantListReport() {
                     <TableRow key={application.id}>
                       <TableCell className="font-medium text-sm">{application.student_name}</TableCell>
                       <TableCell className="text-sm">{application.enrollment_number}</TableCell>
-                      <TableCell className="text-sm">{application.department}</TableCell>
+                      <TableCell className="text-sm">{application.branch}</TableCell>
                       <TableCell className="text-center font-medium">{application.cgpa ?? '—'}</TableCell>
                       <TableCell>
                         <div>

@@ -2,7 +2,7 @@
  * React Query hooks for the Events (Drives) API module.
  * Covers events CRUD, panels, student assignment, attendance.
  */
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { driveService } from '@/services/driveService';
 import type {
   EventQueryParams,
@@ -31,6 +31,7 @@ export function useEvents(params: EventQueryParams = {}) {
     queryKey: eventKeys.list(params),
     queryFn: () => driveService.getEvents(params),
     staleTime: 2 * 60 * 1000,
+    placeholderData: keepPreviousData,
   });
 }
 

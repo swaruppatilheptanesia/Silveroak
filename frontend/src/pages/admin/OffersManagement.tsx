@@ -49,10 +49,11 @@ import { OfferDetailSheet } from '@/components/offers/OfferDetailSheet';
 import { RejectOfferDialog } from '@/components/offers/RejectOfferDialog';
 import { useCompanies } from '@/hooks/use-employer-api';
 import { useOffers } from '@/hooks/use-offer-api';
-import { usePostingTypeOptions } from '@/hooks/use-posting-type-options';
-import { formatDate } from '@/lib/formatters';
+import { formatDate, toDateParam } from '@/lib/formatters';
 import { formatPostingTypeLabel } from '@/lib/postingModule';
 import { getOfferCompensation } from '@/lib/offerModule';
+import { useAuth } from '@/contexts/AuthContext';
+import { hasPermission } from '@/lib/permissionModule';
 import {
   COMPLIANCE_STATUS_CONFIG,
   JOINING_STATUS_CONFIG,
@@ -116,7 +117,6 @@ export default function OffersManagement() {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | OfferStatus>('all');
   const [postingTypeFilter, setPostingTypeFilter] = useState<string>('all');
-  const { options: postingTypeOptions, isLoading: postingTypesLoading, isEmpty: postingTypesEmpty } = usePostingTypeOptions();
   const [companyFilter, setCompanyFilter] = useState('all');
   const [instituteFilter, setInstituteFilter] = useState('');
   const [courseFilter, setCourseFilter] = useState('');
@@ -135,6 +135,13 @@ export default function OffersManagement() {
   const [joiningDialogOpen, setJoiningDialogOpen] = useState(false);
   const [detailSheetOpen, setDetailSheetOpen] = useState(false);
 
+  // Offer action gating — a Super Admin revoking Export/Create/Edit from the Roles tab hides these
+  // controls (the backend already enforces create/edit; this removes the misleading buttons).
+  const { user } = useAuth();
+  const canExport = hasPermission(user?.permissions, { module: 'offers', action: 'export' }, user?.role);
+  const canCreate = hasPermission(user?.permissions, { module: 'offers', action: 'create' }, user?.role);
+  const canEditOffers = hasPermission(user?.permissions, { module: 'offers', action: 'edit' }, user?.role);
+
   const deferredSearch = useDeferredValue(searchTerm);
 
   const offersQuery = useOffers({
@@ -148,8 +155,8 @@ export default function OffersManagement() {
     branch: branchFilter || undefined,
     semester: semesterFilter === 'all' ? undefined : semesterFilter,
     academic_year: academicYearFilter === 'all' ? undefined : academicYearFilter,
-    date_from: dateRange.from ? dateRange.from.toISOString() : undefined,
-    date_to: dateRange.to ? dateRange.to.toISOString() : undefined,
+    date_from: toDateParam(dateRange.from),
+    date_to: toDateParam(dateRange.to),
     // Server-side: searches every offer (role / company / student name / enrolment), not just the
     // rows already loaded on this page.
     search: deferredSearch.trim() || undefined,
@@ -306,14 +313,18 @@ export default function OffersManagement() {
                 </CardDescription>
               </div>
               <div className="flex flex-wrap gap-2">
-                <Button variant="outline" onClick={handleExport}>
-                  <Download className="mr-2 h-4 w-4" />
-                  Export
-                </Button>
-                <Button onClick={() => setCreateDialogOpen(true)}>
-                  <Plus className="mr-2 h-4 w-4" />
-                  Create Offer
-                </Button>
+                {canExport && (
+                  <Button variant="outline" onClick={handleExport}>
+                    <Download className="mr-2 h-4 w-4" />
+                    Export
+                  </Button>
+                )}
+                {canCreate && (
+                  <Button onClick={() => setCreateDialogOpen(true)}>
+                    <Plus className="mr-2 h-4 w-4" />
+                    Create Offer
+                  </Button>
+                )}
               </div>
             </div>
           </CardHeader>
@@ -352,35 +363,6 @@ export default function OffersManagement() {
               </Select>
 
               <Select
-                value={postingTypeFilter}
-                onValueChange={(value) => {
-                  setPostingTypeFilter(value);
-                  setPage(1);
-                }}
-                disabled={postingTypesLoading}
-              >
-                <SelectTrigger className="w-full lg:w-44">
-                  <SelectValue placeholder="Posting Type" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Posting Types</SelectItem>
-                  {postingTypesEmpty ? (
-                    <SelectItem value="__empty__" disabled>
-                      No posting types defined
-                    </SelectItem>
-                  ) : (
-                    // Bind the master UUID: this filter is sent as `posting_type_master_id`, which the
-                    // API validates as a uuid. Binding option.value 400s the whole list.
-                    postingTypeOptions.map((option) => (
-                      <SelectItem key={option.id} value={option.id}>
-                        {option.label}
-                      </SelectItem>
-                    ))
-                  )}
-                </SelectContent>
-              </Select>
-
-              <Select
                 value={companyFilter}
                 onValueChange={(value) => {
                   setCompanyFilter(value);
@@ -407,6 +389,7 @@ export default function OffersManagement() {
               branch={{ value: branchFilter, onChange: (value) => { setBranchFilter(value); setPage(1); } }}
               semester={{ value: semesterFilter, onChange: (value) => { setSemesterFilter(value); setPage(1); } }}
               academicYear={{ value: academicYearFilter, onChange: (value) => { setAcademicYearFilter(value); setPage(1); } }}
+              postingType={{ value: postingTypeFilter, onChange: (value) => { setPostingTypeFilter(value); setPage(1); }, bind: 'id' }}
               dateRange={{ value: dateRange, onChange: (range) => { setDateRange(range); setPage(1); } }}
             />
           </CardContent>
@@ -537,7 +520,7 @@ export default function OffersManagement() {
                             <Button variant="ghost" size="sm" onClick={() => openDetail(offer.id)}>
                               <Eye className="h-4 w-4" />
                             </Button>
-                            {offer.status === 'pending_student_action' && (
+                            {canEditOffers && offer.status === 'pending_student_action' && (
                               <Button
                                 variant="ghost"
                                 size="sm"
@@ -547,7 +530,7 @@ export default function OffersManagement() {
                                 <XCircle className="h-4 w-4" />
                               </Button>
                             )}
-                            {offer.status === 'accepted' && offer.joining_status === 'pending' && (
+                            {canEditOffers && offer.status === 'accepted' && offer.joining_status === 'pending' && (
                               <Button variant="outline" size="sm" onClick={() => openJoining(offer.id)}>
                                 <UserCheck className="mr-2 h-4 w-4" />
                                 Joining
@@ -615,6 +598,7 @@ export default function OffersManagement() {
           onClose={() => setDetailSheetOpen(false)}
           onReject={openReject}
           onUpdateJoining={openJoining}
+          readOnly={!canEditOffers}
         />
       )}
     </DashboardLayout>

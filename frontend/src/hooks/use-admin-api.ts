@@ -4,7 +4,6 @@
  */
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { adminService } from '@/services/adminService';
-import { masterService } from '@/services/masterService';
 import type {
   AdminPortfolioQueryParams,
   AdminStudentQueryParams,
@@ -23,7 +22,6 @@ import type {
   ReopenPlacementInput,
   VerifyStudentInput,
 } from '@/types/admin';
-import { masterKeys } from '@/hooks/use-master-api';
 
 // ── Query Keys ─────────────────────────────────────────
 
@@ -187,6 +185,7 @@ export function useAdminStudents(params: AdminStudentQueryParams = {}, enabled =
     queryFn: () => adminService.getStudents(params),
     enabled,
     staleTime: 60 * 1000,
+    placeholderData: keepPreviousData,
   });
 }
 
@@ -297,16 +296,6 @@ export function useAdminPortfolios(params: AdminPortfolioQueryParams = {}) {
   });
 }
 
-export function useAdminDepartmentOptions() {
-  return useQuery({
-    queryKey: masterKeys.publicValues('branch'),
-    queryFn: async () => {
-      const payload = await masterService.getMasters({ category: 'branch' });
-      return payload.map((item) => item.value);
-    },
-    staleTime: 5 * 60 * 1000,
-  });
-}
 
 // ── Selection Database Hooks ──────────────────────────
 
@@ -363,6 +352,14 @@ export function useWithdrawInterestRegistration() {
   return useMutation({
     mutationFn: ({ id, reason }: { id: string; reason?: string }) =>
       adminService.withdrawInterestRegistration(id, reason),
+    onSuccess: () => invalidateInterestQueries(qc),
+  });
+}
+
+export function useDeleteInterestRegistration() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => adminService.deleteInterestRegistration(id),
     onSuccess: () => invalidateInterestQueries(qc),
   });
 }

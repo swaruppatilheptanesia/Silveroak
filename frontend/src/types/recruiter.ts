@@ -74,6 +74,7 @@ export interface RecruiterApplication {
     full_name: string;
     enrollment_number: string;
     department: string;
+    branch?: string | null;
     batch: string;
   };
 }

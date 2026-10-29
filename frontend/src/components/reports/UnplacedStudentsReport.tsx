@@ -47,7 +47,7 @@ export default function UnplacedStudentsReport() {
   const { data, isLoading } = useUnplacedStudentsReport(queryParams);
 
   const students: any[] = data?.students ?? [];
-  const branchBreakdown = data?.branch_breakdown ?? data?.dept_breakdown ?? [];
+  const branchBreakdown = data?.branch_breakdown ?? [];
   const stats = data?.stats ?? { total: 0, verified: 0, pending: 0, rejected: 0 };
 
   const institutes = useMemo(
@@ -59,7 +59,7 @@ export default function UnplacedStudentsReport() {
     [students],
   );
   const branches = useMemo(
-    () => Array.from(new Set(students.map((student: any) => student.department).filter(Boolean))).sort(),
+    () => Array.from(new Set(students.map((r: any) => r.branch).filter(Boolean))).sort(),
     [students],
   );
   const semesters = useMemo(
@@ -74,7 +74,7 @@ export default function UnplacedStudentsReport() {
 
   const handleExport = () => {
     const rows = students.map((student: any) => (
-      `"${student.full_name}",${student.roll_number},${student.email},"${student.institute ?? ''}","${student.course ?? ''}","${student.department}",${student.semester ?? ''},${formatCgpa(student.cgpa)},${student.backlog_count ?? 0},${student.profile_completion_percentage}%,${student.verification_status}`
+      `"${student.full_name}",${student.roll_number},${student.email},"${student.institute ?? ''}","${student.course ?? ''}","${student.branch}",${student.semester ?? ''},${formatCgpa(student.cgpa)},${student.backlog_count ?? 0},${student.profile_completion_percentage}%,${student.verification_status}`
     ));
 
     downloadCSV(
@@ -174,9 +174,7 @@ export default function UnplacedStudentsReport() {
               <SelectContent>
                 <SelectItem value="all">All Branches</SelectItem>
                 {branches.map((branch) => (
-                  <SelectItem key={branch} value={branch}>
-                    {branch}
-                  </SelectItem>
+                  <SelectItem key={branch} value={branch}>{branch}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -274,7 +272,7 @@ export default function UnplacedStudentsReport() {
                       </TableCell>
                       <TableCell className="text-sm">{student.institute ?? '—'}</TableCell>
                       <TableCell className="text-sm">{student.course ?? '—'}</TableCell>
-                      <TableCell className="text-sm">{student.department}</TableCell>
+                      <TableCell className="text-sm">{student.branch}</TableCell>
                       <TableCell className="text-center text-sm">{student.semester ?? '—'}</TableCell>
                       <TableCell className="text-sm">{student.batch}</TableCell>
                       <TableCell className="text-right font-medium">{formatCgpa(student.cgpa)}</TableCell>

@@ -23,7 +23,7 @@ const EXPORT_FIELDS: ExportField[] = [
   // Identity
   { id: 'student_name', label: 'Full Name', category: 'Identity' },
   { id: 'enrollment_number', label: 'Enrollment Number', category: 'Identity' },
-  { id: 'department', label: 'Department / Branch', category: 'Identity' },
+  { id: 'branch', label: 'Branch', category: 'Identity' },
   { id: 'batch', label: 'Batch Year', category: 'Identity' },
   // Blocked personal fields
   { id: 'email', label: 'Email Address', category: 'Personal Contact', blocked: true, blockReason: 'Blocked by university policy to prevent direct contact bypass' },
@@ -75,7 +75,7 @@ export function ExportCandidatesDialog({
   onExportLogged,
 }: ExportCandidatesDialogProps) {
   const [selectedFields, setSelectedFields] = useState<Set<string>>(
-    new Set(['student_name', 'enrollment_number', 'department', 'batch', 'cgpa', 'current_stage'])
+    new Set(['student_name', 'enrollment_number', 'branch', 'batch', 'cgpa', 'current_stage'])
   );
   const [format, setFormat] = useState<'excel' | 'pdf'>('excel');
   const [showPreview, setShowPreview] = useState(false);

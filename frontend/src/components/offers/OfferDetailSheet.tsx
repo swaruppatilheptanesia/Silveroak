@@ -181,7 +181,7 @@ export function OfferDetailSheet({
                 <div className="rounded-lg bg-muted/50 p-3">
                   <p className="font-semibold text-foreground">{offer.student.full_name}</p>
                   <p className="text-sm text-muted-foreground">
-                    {offer.student.enrollment_number} • {offer.student.department}
+                    {offer.student.enrollment_number} • {offer.student.branch ?? offer.student.department}
                   </p>
                 </div>
               </div>

@@ -253,7 +253,7 @@ export function ImportFromOffersDialog({ open, onOpenChange }: ImportFromOffersD
                         <TableCell>
                           <div>
                             <p className="font-medium text-sm">{offer.student_name}</p>
-                            <p className="text-xs text-muted-foreground">{offer.enrollment_number} • {offer.department}</p>
+                            <p className="text-xs text-muted-foreground">{offer.enrollment_number} • {offer.branch ?? offer.department}</p>
                           </div>
                         </TableCell>
                         <TableCell>

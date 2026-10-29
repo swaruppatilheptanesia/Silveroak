@@ -5,6 +5,13 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Progress } from '@/components/ui/progress';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { SearchableSelect } from '@/components/shared/SearchableSelect';
 import { useMasterValues } from '@/hooks/use-master-api';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -18,7 +25,7 @@ type QueryParams = {
   from?: Date;
   to?: Date;
   academic_year?: string;
-  department?: string;
+  branch?: string;
   batch?: string;
   posting_type?: string;
   search?: string;
@@ -37,7 +44,7 @@ export default function OfferToJoinFunnelReport() {
   const [dateRange, setDateRange] = useState<DateRange>({ from: undefined, to: undefined });
   const [academicYear, setAcademicYear] = useState('');
   const [postingTypeFilter, setPostingTypeFilter] = useState('all');
-  const [deptFilter, setDeptFilter] = useState('all');
+  const [branchFilter, setBranchFilter] = useState('all');
   const [batchFilter, setBatchFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const academicYearQuery = useMasterValues('academic_year');
@@ -46,11 +53,11 @@ export default function OfferToJoinFunnelReport() {
     from: dateRange.from,
     to: dateRange.to,
     academic_year: academicYear || undefined,
-    department: deptFilter === 'all' ? undefined : deptFilter,
+    branch: branchFilter === 'all' ? undefined : branchFilter,
     batch: batchFilter === 'all' ? undefined : batchFilter,
     posting_type_master_id: postingTypeFilter === 'all' ? undefined : postingTypeFilter,
     search: searchQuery || undefined,
-  }), [academicYear, batchFilter, dateRange.from, dateRange.to, deptFilter, postingTypeFilter, searchQuery]);
+  }), [academicYear, batchFilter, dateRange.from, dateRange.to, branchFilter, postingTypeFilter, searchQuery]);
 
   const { data, isLoading } = useOfferToJoinFunnelReport(queryParams);
 
@@ -66,23 +73,16 @@ export default function OfferToJoinFunnelReport() {
     pending_join: 0,
   };
 
-  const departments = useMemo<string[]>(
-    () => uniqueNonEmptyStrings(offers.map((offer: any) => offer.department)),
-    [offers],
-  );
   const batches = useMemo<string[]>(
     () => uniqueNonEmptyStrings(offers.map((offer: any) => offer.batch)),
     [offers],
   );
+  const branches = useMemo(() => Array.from(new Set(offers.map((r: any) => r.branch).filter(Boolean))).sort() as string[], [offers]);
   const academicYearOptions = useMemo(
     () => [...(academicYearQuery.data ?? [])]
       .sort((left, right) => right.localeCompare(left))
       .map((year) => ({ value: year, label: year })),
     [academicYearQuery.data],
-  );
-  const departmentOptions = useMemo(
-    () => departments.map((department) => ({ value: department, label: department })),
-    [departments],
   );
   const batchOptions = useMemo(
     () => batches.map((batch) => ({ value: batch, label: batch })),
@@ -91,11 +91,11 @@ export default function OfferToJoinFunnelReport() {
 
   const handleExport = () => {
     const rows = offers.map((offer: any) => (
-      `"${offer.student_name}",${offer.enrollment_number},${offer.department},${offer.batch},${offer.company_name},${offer.role},${offer.type},${OFFER_STATUS_CONFIG[offer.status as keyof typeof OFFER_STATUS_CONFIG]?.label ?? offer.status},${JOINING_STATUS_CONFIG[offer.joining_status as keyof typeof JOINING_STATUS_CONFIG]?.label ?? offer.joining_status}`
+      `"${offer.student_name}",${offer.enrollment_number},${offer.branch},${offer.batch},${offer.company_name},${offer.role},${offer.type},${OFFER_STATUS_CONFIG[offer.status as keyof typeof OFFER_STATUS_CONFIG]?.label ?? offer.status},${JOINING_STATUS_CONFIG[offer.joining_status as keyof typeof JOINING_STATUS_CONFIG]?.label ?? offer.joining_status}`
     ));
 
     downloadCSV(
-      `Student,Enrollment,Department,Batch,Company,Role,Type,Status,Joining\n${rows.join('\n')}`,
+      `Student,Enrollment,Branch,Batch,Company,Role,Type,Status,Joining\n${rows.join('\n')}`,
       'offer_to_join_funnel',
     );
   };
@@ -140,19 +140,19 @@ export default function OfferToJoinFunnelReport() {
             value={postingTypeFilter}
             onValueChange={setPostingTypeFilter}
             triggerClassName="h-9 w-[160px] text-xs"
+            academicYear={academicYear}
           />
-          <SearchableSelect
-            options={departmentOptions}
-            value={deptFilter === 'all' ? '' : deptFilter}
-            onValueChange={(value) => setDeptFilter(value || 'all')}
-            placeholder="Department"
-            searchPlaceholder="Search department..."
-            emptyMessage="No departments found."
-            loadingMessage="Loading departments..."
-            clearable
-            buttonClassName="h-9 w-[180px] text-xs"
-            contentClassName="w-[min(28rem,calc(100vw-2rem))]"
-          />
+          <Select value={branchFilter} onValueChange={setBranchFilter}>
+            <SelectTrigger className="h-9 w-[160px] text-xs">
+              <SelectValue placeholder="Branch" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Branches</SelectItem>
+              {branches.map((branch) => (
+                <SelectItem key={branch} value={branch}>{branch}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <SearchableSelect
             options={batchOptions}
             value={batchFilter === 'all' ? '' : batchFilter}

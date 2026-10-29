@@ -127,6 +127,12 @@ export const nocCompletionCertificateUpload = createDiskUpload({
   invalidTypeMessage: 'Only PDF files are allowed',
 });
 
+export const nocTerminationLetterUpload = createDiskUpload({
+  directory: 'noc-termination-letters',
+  allowedMimeTypes: PDF_MIME_TYPES,
+  invalidTypeMessage: 'Only PDF files are allowed',
+});
+
 export const announcementAttachmentUpload = createDiskUpload({
   directory: 'announcement-attachments',
   allowedMimeTypes: [...PDF_MIME_TYPES, ...PROFILE_PHOTO_MIME_TYPES],

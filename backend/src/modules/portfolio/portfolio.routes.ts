@@ -3,6 +3,7 @@ import * as ctrl from './portfolio.controller';
 import { requireStudentProfileAccess } from '../../middleware/student-access';
 import { validate } from '../../middleware/validate';
 import { requireRole } from '../../middleware/role';
+import { requirePermission } from '../../middleware/permission';
 import { portfolioShowcaseProofUpload } from '../../middleware/upload';
 import { createPortfolioProjectSchema, updatePortfolioProjectSchema, createShowcaseSchema, updatePortfolioStatusSchema } from './portfolio.schema';
 
@@ -24,6 +25,6 @@ router.post('/me/showcases/proof', portfolioShowcaseProofUpload.single('file'), 
 router.post('/me/showcases', validate(createShowcaseSchema), ctrl.addShowcase);
 router.delete('/me/showcases/:showcaseId', ctrl.deleteShowcase);
 
-router.get('/:studentId', requireRole('tpo_admin', 'tpo_employee', 'faculty_coordinator', 'super_admin'), ctrl.getStudentPortfolio);
+router.get('/:studentId', requireRole('tpo_admin', 'tpo_employee', 'faculty_coordinator', 'super_admin'), requirePermission('portfolios', 'view'), ctrl.getStudentPortfolio);
 
 export default router;

@@ -2,34 +2,39 @@ import { useMemo, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Progress } from '@/components/ui/progress';
 import {
   Download,
-  Filter,
   FolderKanban,
   Briefcase,
   Eye,
   EyeOff,
 } from 'lucide-react';
 import { format } from 'date-fns';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { usePortfolioCompletionReport } from '@/hooks/use-report-analytics-api';
 import { ReportToolbar, downloadCSV, type DateRange } from './ReportToolbar';
 
 type QueryParams = {
-  department?: string;
+  branch?: string;
   batch?: string;
   search?: string;
 };
 
 export default function PortfolioCompletionReport() {
-  const [deptFilter, setDeptFilter] = useState('all');
+  const [branchFilter, setBranchFilter] = useState('all');
   const [dateRange] = useState<DateRange>({ from: undefined, to: undefined });
 
   const queryParams = useMemo<QueryParams>(() => ({
-    department: deptFilter === 'all' ? undefined : deptFilter,
-  }), [deptFilter]);
+    branch: branchFilter === 'all' ? undefined : branchFilter,
+  }), [branchFilter]);
 
   const { data, isLoading } = usePortfolioCompletionReport(queryParams);
 
@@ -38,7 +43,7 @@ export default function PortfolioCompletionReport() {
       id: portfolio.student_id,
       student_name: portfolio.full_name,
       enrollment_number: portfolio.enrollment_number,
-      department: portfolio.department,
+      branch: portfolio.branch,
       batch: portfolio.batch,
       status: portfolio.status,
       project_count: portfolio.project_count,
@@ -47,14 +52,15 @@ export default function PortfolioCompletionReport() {
     }));
   }, [data]);
 
+  const branches = useMemo(() => Array.from(new Set(portfolios.map((r: any) => r.branch).filter(Boolean))).sort() as string[], [portfolios]);
+
   const stats = data?.stats ?? { total: 0, with_both: 0, project_only: 0, empty: 0 };
   const completionBands = data?.bands ?? [];
-  const departments = useMemo(() => Array.from(new Set(portfolios.map((portfolio) => portfolio.department))).sort(), [portfolios]);
 
   const handleExport = () => {
-    const csvContent = `Student,Enrollment,Department,Batch,Status,Projects,Internships,Last Updated\n` +
+    const csvContent = `Student,Enrollment,Branch,Batch,Status,Projects,Internships,Last Updated\n` +
       portfolios.map((portfolio) =>
-        `${portfolio.student_name},${portfolio.enrollment_number},${portfolio.department},${portfolio.batch},${portfolio.status},${portfolio.project_count},${portfolio.internship_count},${format(new Date(portfolio.last_updated), 'dd/MM/yyyy')}`
+        `${portfolio.student_name},${portfolio.enrollment_number},${portfolio.branch},${portfolio.batch},${portfolio.status},${portfolio.project_count},${portfolio.internship_count},${format(new Date(portfolio.last_updated), 'dd/MM/yyyy')}`
       ).join('\n');
     downloadCSV(csvContent, 'portfolio_completion_report');
   };
@@ -101,15 +107,14 @@ export default function PortfolioCompletionReport() {
         </CardHeader>
         <CardContent>
           <div className="flex gap-3 mb-4">
-            <Select value={deptFilter} onValueChange={setDeptFilter}>
+            <Select value={branchFilter} onValueChange={setBranchFilter}>
               <SelectTrigger className="w-full md:w-56">
-                <Filter className="h-4 w-4 mr-2" />
-                <SelectValue placeholder="Department" />
+                <SelectValue placeholder="Branch" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Departments</SelectItem>
-                {departments.map((department) => (
-                  <SelectItem key={department} value={department}>{department}</SelectItem>
+                <SelectItem value="all">All Branches</SelectItem>
+                {branches.map((branch) => (
+                  <SelectItem key={branch} value={branch}>{branch}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -120,7 +125,7 @@ export default function PortfolioCompletionReport() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Student</TableHead>
-                  <TableHead>Department</TableHead>
+                  <TableHead>Branch</TableHead>
                   <TableHead className="text-center">Projects</TableHead>
                   <TableHead className="text-center">Internships</TableHead>
                   <TableHead>Status</TableHead>
@@ -140,7 +145,7 @@ export default function PortfolioCompletionReport() {
                         <p className="text-xs text-muted-foreground">{portfolio.enrollment_number}</p>
                       </div>
                     </TableCell>
-                    <TableCell className="text-sm">{portfolio.department}</TableCell>
+                    <TableCell className="text-sm">{portfolio.branch}</TableCell>
                     <TableCell className="text-center">{portfolio.project_count}</TableCell>
                     <TableCell className="text-center">{portfolio.internship_count}</TableCell>
                     <TableCell>

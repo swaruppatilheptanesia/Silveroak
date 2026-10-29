@@ -39,8 +39,8 @@ export interface CompanyWiseStats {
 }
 
 export interface DepartmentWiseStats {
-  departments: Array<{
-    department: string;
+  branches: Array<{
+    branch: string;
     count: number;
   }>;
 }

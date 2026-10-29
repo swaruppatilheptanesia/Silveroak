@@ -66,21 +66,23 @@ interface SidebarNavItem {
 }
 
 // Student Navigation
-const studentMainNavItems = [
+const studentMainNavItems: SidebarNavItem[] = [
   { icon: LayoutDashboard, label: 'Dashboard', href: '/' },
   { icon: User, label: 'My Profile', href: '/profile' },
   { icon: FolderKanban, label: 'My Portfolio', href: '/portfolio' },
 ];
 
-const studentPlacementNavItems = [
+// Placement items carry per-module View requirements so a Super Admin revoking a student's View from
+// the Roles tab hides the nav item (matches the backend requirePermission gate on the student routes).
+const studentPlacementNavItems: SidebarNavItem[] = [
   { icon: Briefcase, label: 'Opportunities', href: '/opportunities' },
-  { icon: Send, label: 'My Applications', href: '/applications' },
-  { icon: FileText, label: 'NOC Requests', href: '/noc' },
+  { icon: Send, label: 'My Applications', href: '/applications', requiredPermission: { module: 'applications', action: 'view' } },
+  { icon: FileText, label: 'NOC Requests', href: '/noc', requiredPermission: { module: 'noc_requests', action: 'view' } },
   { icon: Building2, label: 'Companies', href: '/companies', disabled: true },
-  { icon: Calendar, label: 'My Events & Drives', href: '/drives' },
+  { icon: Calendar, label: 'My Events & Drives', href: '/drives', requiredPermission: { module: 'events', action: 'view' } },
   { icon: Megaphone, label: 'Announcements', href: '/announcements' },
   { icon: FileStack, label: 'Circulars', href: '/circulars' },
-  { icon: FileCheck, label: 'No Dues Certificate', href: '/no-dues' },
+  { icon: FileCheck, label: 'No Dues Certificate', href: '/no-dues', requiredPermission: { module: 'no_dues', action: 'view' } },
 ];
 
 // Admin Navigation - Simplified structure
@@ -266,7 +268,7 @@ export function AppSidebar() {
           ? facultyMainNavItems
           : isRecruiter
             ? recruiterMainNavItems.filter(canAccessNavItem)
-            : studentMainNavItems;
+            : studentMainNavItems.filter(canAccessNavItem);
 
   const placementNavItems = isSuperAdmin
     ? []
@@ -280,7 +282,7 @@ export function AppSidebar() {
           ? facultyPlacementNavItems
           : isRecruiter
             ? recruiterPlacementNavItems.filter(canAccessNavItem)
-            : studentPlacementNavItems;
+            : studentPlacementNavItems.filter(canAccessNavItem);
 
   const isStudent = currentRole === 'student';
   const newIndicators = useStudentNewIndicators(isStudent);

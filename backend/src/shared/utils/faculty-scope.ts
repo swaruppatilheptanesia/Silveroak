@@ -24,6 +24,7 @@ type FacultyUserLike = {
 };
 
 type StudentScopeFields = {
+  branch?: string | null;
   department?: string | null;
   course?: string | null;
   institute?: string | null;
@@ -87,11 +88,14 @@ export function studentMatchesFacultyScope(student: StudentScopeFields, scope: F
     return false;
   }
 
-  // Program gate — student's department (course-derived) or course must match one of the
-  // faculty's department/course/branch values. Branch falls back to course because students
-  // carry no branch-level attribute.
+  // Program gate — the student's real ERP branch, course, or (transitional) course-derived
+  // department must match one of the faculty's assigned department/course/branch values.
   if (scope.programValues.length > 0) {
-    return matchesAny(student.department, scope.programValues) || matchesAny(student.course, scope.programValues);
+    return (
+      matchesAny(student.branch, scope.programValues)
+      || matchesAny(student.course, scope.programValues)
+      || matchesAny(student.department, scope.programValues)
+    );
   }
 
   // Institute-only scope: the institute gate above already passed.
